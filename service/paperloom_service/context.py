@@ -40,7 +40,9 @@ def _budget(segments: list[dict], max_chars: int) -> list[dict]:
     return out
 
 
-def _find_selection_segment(segments: list[dict], selection_text: str, page: int) -> int:
+def _find_selection_segment(
+    segments: list[dict], selection_text: str, page: int
+) -> int:
     needle = re.sub(r"\s+", " ", selection_text).strip().lower()[:120]
     if not needle:
         return -1
@@ -93,12 +95,20 @@ def build_context(
 ) -> dict:
     """Return {segments, text, scope, anchorId, note}."""
     if not segments:
-        return {"segments": [], "text": "", "scope": scope, "anchorId": None, "note": "论文尚未解析"}
+        return {
+            "segments": [],
+            "text": "",
+            "scope": scope,
+            "anchorId": None,
+            "note": "论文尚未解析",
+        }
 
     note = ""
     index = -1
     if selection and selection.get("text"):
-        index = _find_selection_segment(segments, selection["text"], int(selection.get("page", 1)))
+        index = _find_selection_segment(
+            segments, selection["text"], int(selection.get("page", 1))
+        )
 
     chosen: list[dict]
     anchor_id = None
@@ -113,7 +123,11 @@ def build_context(
         anchor_id = segments[index]["id"]
     elif scope == "paper":
         abstracts = [s for s in segments if s.get("kind") in {"title", "abstract"}]
-        bodies = [s for s in segments if s.get("kind") in {"heading", "body", "caption", "formula"}]
+        bodies = [
+            s
+            for s in segments
+            if s.get("kind") in {"heading", "body", "caption", "formula"}
+        ]
         chosen = abstracts + bodies
         if selection and selection.get("text"):
             anchor_id = segments[index]["id"] if index >= 0 else None
@@ -122,7 +136,9 @@ def build_context(
         chosen = segments[:12]
         note = "未能在解析结果中定位选区，已回退为文档开头上下文"
         if question:
-            extra = _keyword_segments(segments, question, exclude={s["id"] for s in chosen})
+            extra = _keyword_segments(
+                segments, question, exclude={s["id"] for s in chosen}
+            )
             chosen += extra
         anchor_id = chosen[0]["id"] if chosen else None
 
@@ -140,7 +156,9 @@ def build_context(
     }
 
 
-def _keyword_segments(segments: Iterable[dict], question: str, exclude: set[str]) -> list[dict]:
+def _keyword_segments(
+    segments: Iterable[dict], question: str, exclude: set[str]
+) -> list[dict]:
     terms = [t.lower() for t in re.findall(r"[A-Za-z]{4,}", question)][:6]
     if not terms:
         return []
@@ -187,5 +205,7 @@ def validate_citations(answer: str, segments: list[dict]) -> tuple[str, list[dic
 
 
 def build_paper_meta(segments: list[dict], limit: int = 30) -> str:
-    heading_lines = [f"- p.{s['page']} {s['text'][:120]}" for s in _headings(segments, limit)]
+    heading_lines = [
+        f"- p.{s['page']} {s['text'][:120]}" for s in _headings(segments, limit)
+    ]
     return "\n".join(heading_lines)

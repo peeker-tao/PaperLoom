@@ -145,6 +145,9 @@ MIGRATIONS: list[str] = [
     # Layout (BabelDOC) status is tracked separately from text translation so a
     # failed/absent engine never hides the usable text result.
     """ALTER TABLE jobs ADD COLUMN layout TEXT;""",
+    # Segmentation output changes with parser fixes; the version makes stale
+    # segment sets detectable instead of silently keeping them.
+    """ALTER TABLE documents ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0;""",
 ]
 
 
@@ -205,7 +208,7 @@ class Database:
             if existing and existing["file_hash"] == doc.get("file_hash"):
                 conn.execute(
                     "UPDATE documents SET title=?, pages=?, alignment=?, alignment_note=?, "
-                    "scanned=?, text_chars=?, pdf_path=?, updated_at=? WHERE id=?",
+                    "scanned=?, text_chars=?, pdf_path=?, parser_version=?, updated_at=? WHERE id=?",
                     (
                         doc.get("title", ""),
                         doc.get("pages", 0),
@@ -214,6 +217,7 @@ class Database:
                         1 if doc.get("scanned") else 0,
                         doc.get("text_chars", 0),
                         doc.get("pdf_path", ""),
+                        int(doc.get("parser_version", 0)),
                         now(),
                         doc["id"],
                     ),
@@ -222,16 +226,18 @@ class Database:
             conn.execute(
                 """INSERT INTO documents(
                     id, library_id, item_key, attachment_key, file_hash, pdf_path, title,
-                    pages, alignment, alignment_note, scanned, text_chars, created_at, updated_at)
+                    pages, alignment, alignment_note, scanned, text_chars, parser_version,
+                    created_at, updated_at)
                    VALUES (:id, :library_id, :item_key, :attachment_key, :file_hash, :pdf_path,
                     :title, :pages, :alignment, :alignment_note, :scanned, :text_chars,
-                    :created_at, :updated_at)
+                    :parser_version, :created_at, :updated_at)
                    ON CONFLICT(id) DO UPDATE SET
                     library_id=excluded.library_id, item_key=excluded.item_key,
                     attachment_key=excluded.attachment_key, file_hash=excluded.file_hash,
                     pdf_path=excluded.pdf_path, title=excluded.title, pages=excluded.pages,
                     alignment=excluded.alignment, alignment_note=excluded.alignment_note,
                     scanned=excluded.scanned, text_chars=excluded.text_chars,
+                    parser_version=excluded.parser_version,
                     updated_at=excluded.updated_at
                 """,
                 {
@@ -247,6 +253,7 @@ class Database:
                     "alignment_note": doc.get("alignment_note", ""),
                     "scanned": 1 if doc.get("scanned") else 0,
                     "text_chars": int(doc.get("text_chars", 0)),
+                    "parser_version": int(doc.get("parser_version", 0)),
                     "created_at": doc.get("created_at", now()),
                     "updated_at": now(),
                 },

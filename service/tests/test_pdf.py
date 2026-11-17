@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from tests.fixtures import paper_pdf, scanned_pdf, two_column_pdf
+from tests.fixtures import (
+    hyphenation_pdf,
+    paginated_paper_pdf,
+    paper_pdf,
+    scanned_pdf,
+    two_column_pdf,
+)
 
 
 def test_extracts_paragraphs_and_merges_lines(tmp_path):
@@ -60,7 +66,9 @@ def test_noise_and_author_blocks_are_classified():
     assert _is_noise("2")
     assert _is_noise("r")
     assert _is_noise("0 2")
-    assert not _is_noise("We propose a relay diffusion model for text-to-image generation.")
+    assert not _is_noise(
+        "We propose a relay diffusion model for text-to-image generation."
+    )
 
     assert _is_author_block("Wendi Zheng1∗‡, Jiayan Teng1∗‡, Zhuoyi Yang1‡")
     assert _is_author_block("1 Tsinghua University, Beijing, China")
@@ -75,3 +83,105 @@ def test_coverage_never_exceeds_one(tmp_path):
 
     doc = parse_pdf(paper_pdf(tmp_path / "p.pdf", pages=2))
     assert 0 < doc["coverage"] <= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Segmentation quality: the difference between readable and gibberish output
+# --------------------------------------------------------------------------- #
+
+
+def test_rotated_margin_stamp_never_reaches_segments(tmp_path):
+    """Regression: an arXiv-style 90-degree stamp used to shred every paragraph.
+
+    pdfminer reports the rotation on each ``LTChar.matrix`` while
+    ``LTTextLine.matrix`` is empty, so the filter silently did nothing and the
+    stamp characters were interleaved between body lines.
+    """
+    from paperloom_service.pdf.extract import parse_pdf
+
+    path = paginated_paper_pdf(tmp_path / "wm.pdf")
+    doc = parse_pdf(path)
+    joined = " ".join(seg["text"] for seg in doc["segments"])
+    assert "2403" not in joined
+    assert "05121" not in joined
+    # No single-glyph segments survived either.
+    assert all(len(seg["text"].strip()) >= 3 for seg in doc["segments"])
+
+
+def test_paragraph_lines_merge_and_compound_hyphen_is_kept(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+
+    doc = parse_pdf(hyphenation_pdf(tmp_path / "hy.pdf"))
+    joined = " ".join(seg["text"] for seg in doc["segments"])
+    # "im-" + "plementing" is a typesetting hyphenation -> joined into a word.
+    assert "implementing relay diffusion" in joined
+    assert "im- plementing" not in joined
+    # "text-" + "to-image" is a compound -> the hyphen must survive.
+    assert "text-to-image generation" in joined
+    assert "textto-image" not in joined
+
+
+def test_indented_line_starts_a_new_segment(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    texts = [seg["text"] for seg in doc["segments"]]
+    first = next(t for t in texts if t.startswith("We propose a cascaded framework"))
+    second = next(t for t in texts if t.startswith("Second paragraph starts"))
+    assert first != second
+    assert "Second paragraph" not in first
+    # The flush continuation still belongs to the indented paragraph.
+    assert "continues flush with the column edge" in second
+
+
+def test_equation_fragments_are_classified_as_formula(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+    from paperloom_service.translate import is_translatable
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    formula = next(s for s in doc["segments"] if s["text"].startswith("q(xt|x0)"))
+    assert formula["kind"] == "formula"
+    assert not is_translatable(formula)
+
+
+def test_table_cells_are_not_translatable(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+    from paperloom_service.translate import is_translatable
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    cells = [s for s in doc["segments"] if s["text"] in {"SDXL [17]", "LCM-SDXL [14]"}]
+    assert cells, [s["text"] for s in doc["segments"]]
+    assert all(cell["kind"] == "table" for cell in cells)
+    assert not any(is_translatable(cell) for cell in cells)
+
+
+def test_reference_section_is_not_translatable(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+    from paperloom_service.translate import is_translatable
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    entries = [s for s in doc["segments"] if "Achiam" in s["text"] or "Ho, J." in s["text"]]
+    assert entries
+    assert all(entry["kind"] == "reference" for entry in entries), [
+        (e["text"][:40], e["kind"]) for e in entries
+    ]
+    assert not any(is_translatable(entry) for entry in entries)
+
+
+def test_prose_is_still_translatable(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+    from paperloom_service.translate import is_translatable
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    body = [s for s in doc["segments"] if s["kind"] == "body"]
+    assert body
+    assert all(is_translatable(seg) for seg in body), [
+        (s["text"][:50], s["kind"]) for s in body
+    ]
+
+
+def test_every_document_records_its_parser_version(tmp_path):
+    from paperloom_service.pdf.extract import PARSER_VERSION, parse_pdf
+
+    doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
+    assert doc["parser_version"] == PARSER_VERSION

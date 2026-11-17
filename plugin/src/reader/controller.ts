@@ -200,6 +200,11 @@ export class ReaderController {
         title: this.attachment.title,
       });
       const document = registered.document;
+      // A re-parse means the segmentation algorithm changed: paragraph ids and
+      // any previous translations no longer correspond to this text.
+      if (registered.reparsed) {
+        this.notice("已用新版分段重新解析本文，旧译文需要重译");
+      }
       const segments = (await this.host.service.client.getSegments(document.id)).segments;
       const terms = (await this.host.service.client.getGlossary(document.id)).terms;
       let chatModel = "";

@@ -107,10 +107,34 @@ def test_heading_only_section_is_widened():
         "stage that starts from a noised low-resolution image. " * 6
     )
     segs = [
-        {"id": "p1-s0", "page": 1, "text": "1 Introduction", "kind": "heading", "bbox": [0, 0, 1, 1]},
-        {"id": "p1-s1", "page": 1, "text": long_body, "kind": "body", "bbox": [0, 0, 1, 1]},
-        {"id": "p2-s0", "page": 2, "text": "2 Method", "kind": "heading", "bbox": [0, 0, 1, 1]},
-        {"id": "p2-s1", "page": 2, "text": "Should not be included.", "kind": "body", "bbox": [0, 0, 1, 1]},
+        {
+            "id": "p1-s0",
+            "page": 1,
+            "text": "1 Introduction",
+            "kind": "heading",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p1-s1",
+            "page": 1,
+            "text": long_body,
+            "kind": "body",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p2-s0",
+            "page": 2,
+            "text": "2 Method",
+            "kind": "heading",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p2-s1",
+            "page": 2,
+            "text": "Should not be included.",
+            "kind": "body",
+            "bbox": [0, 0, 1, 1],
+        },
     ]
     ctx = build_context(
         segs, scope="section", selection={"text": "1 Introduction", "page": 1}

@@ -26,6 +26,11 @@ def _content(lines: list[tuple[float, float, float, str]]) -> str:
 
 def make_pdf(path: Path, pages: list[list[tuple[float, float, float, str]]]) -> Path:
     """pages: list of pages, each a list of (x, y, fontsize, text)."""
+    return make_pdf_raw(path, [_content(page_lines) for page_lines in pages])
+
+
+def make_pdf_raw(path: Path, page_streams: list[str]) -> Path:
+    """Build a PDF from ready-made content streams (one per page)."""
     objects: list[bytes] = []
 
     def add(obj: str) -> int:
@@ -37,8 +42,7 @@ def make_pdf(path: Path, pages: list[list[tuple[float, float, float, str]]]) -> 
     font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 
     kids: list[str] = []
-    for page_lines in pages:
-        content = _content(page_lines)
+    for content in page_streams:
         content_obj = add(
             f"<< /Length {len(content.encode('latin-1'))} >>\nstream\n{content}\nendstream"
         )
@@ -146,3 +150,81 @@ def two_column_pdf(path: Path) -> Path:
 
 def scanned_pdf(path: Path) -> Path:
     return make_pdf(path, [[]])
+
+
+def _stream(
+    lines: list[tuple[float, float, float, str]],
+    *,
+    watermark: str = "",
+) -> str:
+    """Body text plus an optional 90-degree rotated margin stamp.
+
+    The stamp is emitted glyph by glyph with a rotated text matrix, which is
+    exactly how publishers (arXiv, Elsevier, Springer) put the download marker in
+    the left margin — and exactly what used to shred every paragraph.
+    """
+    parts = [_content(lines)]
+    if watermark:
+        vertical = ["BT"]
+        y = 600.0
+        for char in watermark:
+            vertical.append("/F1 8 Tf")
+            vertical.append(f"0 1 -1 0 20.0 {y:.2f} Tm")
+            vertical.append(f"({_escape(char)}) Tj")
+            y -= 6.0
+        vertical.append("ET")
+        parts.append("\n".join(vertical))
+    return "\n".join(parts)
+
+
+def paginated_paper_pdf(path: Path, *, watermark: str = "2403.05121v1") -> Path:
+    """Two-page paper exercising every segmentation rule.
+
+    Page 1 contains an end-of-line compound hyphen, an indented new paragraph, a
+    display equation and a table row; page 2 contains a reference list.
+    """
+    page1: list[tuple[float, float, float, str]] = [
+        (72.0, 745.0, 16.0, "Relay Diffusion for Text-to-Image"),
+        (72.0, 700.0, 10.0, "Abstract. Recent text-to-image systems rely on"),
+        (72.0, 687.0, 10.0, "single-stage diffusion, which is expensive."),
+        # Continuation of the same abstract: no indent.
+        (72.0, 660.0, 10.0, "We propose a cascaded framework that first"),
+        (72.0, 647.0, 10.0, "generates low-resolution images and applies relay"),
+        (72.0, 634.0, 10.0, "based super-resolution afterwards."),
+        # Indented first line -> must start a new segment.
+        (86.0, 605.0, 10.0, "Second paragraph starts with an indent and ends here."),
+        (72.0, 592.0, 10.0, "It continues flush with the column edge."),
+        # Display equation: must be classified as a formula, not prose.
+        # (ASCII only: the fixture font is Helvetica/latin-1.)
+        (120.0, 565.0, 10.0, "q(xt|x0) = N (xt|F (x0, t), s"),
+        # Table cells: several short fragments -> table, not prose.
+        (72.0, 530.0, 10.0, "Steps Time Cost"),
+        (72.0, 517.0, 10.0, "SDXL [17]"),
+        (72.0, 504.0, 10.0, "CogView3-distill 4+1"),
+        (72.0, 491.0, 10.0, "LCM-SDXL [14]"),
+    ]
+    page2: list[tuple[float, float, float, str]] = [
+        (72.0, 745.0, 12.0, "References"),
+        (72.0, 720.0, 9.0, "1. Achiam, J., Adler, S., et al.: Gpt-4 technical report."),
+        (72.0, 708.0, 9.0, "arXiv preprint arXiv:2303.08774 (2023)"),
+        (72.0, 696.0, 9.0, "2. Ho, J., Salimans, T.: Classifier-free guidance."),
+        (72.0, 684.0, 9.0, "In: NeurIPS. pp. 1-12 (2022)"),
+    ]
+    return make_pdf_raw(
+        path,
+        [_stream(page1, watermark=watermark), _stream(page2, watermark=watermark)],
+    )
+
+
+def hyphenation_pdf(path: Path) -> Path:
+    """Page where a real hyphenation ("im-"/"plementing") meets a compound."""
+    lines: list[tuple[float, float, float, str]] = [
+        (72.0, 745.0, 16.0, "Hyphenation Handling"),
+        (72.0, 700.0, 10.0, "The first model im-"),
+        (72.0, 687.0, 10.0, "plementing relay diffusion is faster."),
+        (72.0, 660.0, 10.0, "Complexities raise one interesting question"),
+        (72.0, 647.0, 10.0, "about the design of components"),
+        (72.0, 634.0, 10.0, "for text-"),
+        (72.0, 621.0, 10.0, "to-image generation at scale."),
+    ]
+    return make_pdf(path, [lines])

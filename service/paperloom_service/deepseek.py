@@ -195,9 +195,7 @@ class DeepSeekClient:
                         json=payload,
                     ) as response:
                         if response.status_code >= 400:
-                            body = (await response.aread()).decode(
-                                "utf-8", "replace"
-                            )
+                            body = (await response.aread()).decode("utf-8", "replace")
                             raise _classify(response.status_code, body)
                         async for event in self._iter_sse(response):
                             if event["type"] == "delta":

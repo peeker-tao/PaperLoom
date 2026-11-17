@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from .urls import normalize_base_url
 
 # Bump whenever the translation prompt changes in a way that affects output.
-PROMPT_VERSION = 2
+# v3: completeness rules, term-annotation rule and neighbour context.
+PROMPT_VERSION = 3
 
 REASON_LABELS = {
     "model": "翻译模型已变更",

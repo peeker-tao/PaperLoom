@@ -160,6 +160,8 @@ export class ServiceClient {
       segmentCount: number;
       cached: boolean;
       coverage?: number;
+      /** True when an older segmentation was rebuilt (former translations are void). */
+      reparsed?: boolean;
     }>("/v1/documents/register", { method: "POST", body: JSON.stringify(payload) });
   }
 

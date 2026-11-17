@@ -63,9 +63,43 @@ user-cancelled requests.
 - `deepseek-flash` runs in *thinking* mode by default. PaperLoom explicitly
   disables thinking for translation requests. If you typed a custom model name,
   make sure it supports `chat/completions` with `thinking: {"type": "disabled"}`.
-- Very short paragraphs (< 5 chars) are skipped by design.
+- Segments shorter than 12 characters are skipped by design, as are display
+  equations, table cells, author blocks and reference lists: translating them
+  produces invented text rather than information.
 - If the whole PDF has almost no extractable text, it is probably a scanned
   document: the job fails with `scanned_pdf` and suggests OCR.
+
+## The translation reads like fragments, not paragraphs
+
+That is a segmentation problem, not a model problem, and 0.1.3 fixes the three
+known causes:
+
+1. **Margin stamps** (the arXiv/Elsevier download marker) are set at 90 degrees.
+   They used to be emitted one glyph per line and spliced between body lines,
+   which both broke paragraph merging and got glued onto sentence ends
+   ("… in terms of computational 1"). They are now filtered by inspecting each
+   glyph's text matrix.
+2. **Indentation**: the next paragraph's indented first line used to be accepted
+   as a continuation of the previous paragraph.
+3. **End-of-line hyphens** were always removed, turning `text-` + `to-image`
+   into `textto-image`. They are now resolved with the document vocabulary.
+
+Inspect a paper without translating anything:
+
+```powershell
+python scripts/check_segmentation.py <paper>.pdf
+# prose length median=381  prose ends .,!?=78%  leftover hyphens=0 ... RESULT: PASS
+```
+
+Then check actual output for a few pages:
+
+```powershell
+python scripts/check_translation_quality.py --pdf <paper>.pdf --pages 1-2
+```
+
+If a document was parsed by an older version, PaperLoom re-parses it
+automatically on the next open and tells you in the sidebar; the previous
+translations are void, so translate again (or use "重译过时段落").
 
 ## Bilingual view says "alignment: page"
 

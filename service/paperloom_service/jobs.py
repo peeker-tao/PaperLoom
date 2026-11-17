@@ -99,7 +99,9 @@ class JobManager:
         task = self._tasks.get(job_id)
         if task and not task.done():
             task.cancel()
-        self.db.update_job(job_id, state="cancelled", stage="done", progress=job.get("progress"))
+        self.db.update_job(
+            job_id, state="cancelled", stage="done", progress=job.get("progress")
+        )
         self._emit(job_id, "job", self._snapshot(job_id))
         self._emit(job_id, "done", {"state": "cancelled"})
         return self.db.get_job(job_id) or job
@@ -118,7 +120,12 @@ class JobManager:
             if finished:
                 return
             job = self.db.get_job(job_id)
-            if job and job["state"] in {"succeeded", "failed", "cancelled", "interrupted"}:
+            if job and job["state"] in {
+                "succeeded",
+                "failed",
+                "cancelled",
+                "interrupted",
+            }:
                 return
             while True:
                 try:
@@ -154,7 +161,9 @@ class JobManager:
             )
             self._seq[job["id"]] = self._next_seq(job["id"])
             self._append_event(
-                job["id"], "error", {"error": {"code": "interrupted", "message": "任务被中断"}}
+                job["id"],
+                "error",
+                {"error": {"code": "interrupted", "message": "任务被中断"}},
             )
             self._append_event(job["id"], "done", {"state": "interrupted"})
 
@@ -176,7 +185,9 @@ class JobManager:
     def _spawn(self, job_id: str) -> None:
         token = asyncio.Event()
         self._cancels[job_id] = token
-        task = asyncio.create_task(self._run(job_id, token), name=f"paperloom-job-{job_id}")
+        task = asyncio.create_task(
+            self._run(job_id, token), name=f"paperloom-job-{job_id}"
+        )
         self._tasks[job_id] = task
         task.add_done_callback(lambda _t: self._tasks.pop(job_id, None))
 
@@ -193,7 +204,11 @@ class JobManager:
             self._emit(job_id, "progress", data)
 
         async def on_segment(segment_id: str, text: str, source: str) -> None:
-            self._emit(job_id, "segment", {"id": segment_id, "translation": text, "source": source})
+            self._emit(
+                job_id,
+                "segment",
+                {"id": segment_id, "translation": text, "source": source},
+            )
 
         async def on_log(message: str) -> None:
             self._emit(job_id, "log", {"message": message})

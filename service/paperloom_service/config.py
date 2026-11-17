@@ -47,7 +47,10 @@ def default_data_dir() -> Path:
         return Path(base) / "PaperLoom"
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "PaperLoom"
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "PaperLoom"
+    return (
+        Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+        / "PaperLoom"
+    )
 
 
 @dataclass
@@ -172,11 +175,17 @@ def _dpapi_protect(data: bytes) -> bytes:  # pragma: no cover - windows only
     from ctypes import wintypes
 
     class DATA_BLOB(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_char)),
+        ]
 
     crypt32 = ctypes.windll.crypt32
     kernel32 = ctypes.windll.kernel32
-    blob_in = DATA_BLOB(len(data), ctypes.cast(ctypes.create_string_buffer(data), ctypes.POINTER(ctypes.c_char)))
+    blob_in = DATA_BLOB(
+        len(data),
+        ctypes.cast(ctypes.create_string_buffer(data), ctypes.POINTER(ctypes.c_char)),
+    )
     blob_out = DATA_BLOB()
     if not crypt32.CryptProtectData(
         ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
@@ -193,11 +202,17 @@ def _dpapi_unprotect(data: bytes) -> bytes:  # pragma: no cover - windows only
     from ctypes import wintypes
 
     class DATA_BLOB(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+        _fields_ = [
+            ("cbData", wintypes.DWORD),
+            ("pbData", ctypes.POINTER(ctypes.c_char)),
+        ]
 
     crypt32 = ctypes.windll.crypt32
     kernel32 = ctypes.windll.kernel32
-    blob_in = DATA_BLOB(len(data), ctypes.cast(ctypes.create_string_buffer(data), ctypes.POINTER(ctypes.c_char)))
+    blob_in = DATA_BLOB(
+        len(data),
+        ctypes.cast(ctypes.create_string_buffer(data), ctypes.POINTER(ctypes.c_char)),
+    )
     blob_out = DATA_BLOB()
     if not crypt32.CryptUnprotectData(
         ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)
@@ -249,7 +264,11 @@ def api_key_status(cfg: RuntimeConfig) -> dict:
     key = load_api_key(cfg)
     source = "none"
     if key:
-        source = "env" if not cfg.secret_path.exists() and os.environ.get("DEEPSEEK_API_KEY") else "store"
+        source = (
+            "env"
+            if not cfg.secret_path.exists() and os.environ.get("DEEPSEEK_API_KEY")
+            else "store"
+        )
     return {"configured": bool(key), "source": source, "hint": _mask(key)}
 
 
@@ -271,15 +290,16 @@ def load_pricing(cfg: RuntimeConfig) -> dict:
     return DEFAULT_PRICING
 
 
-def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int, pricing: dict) -> float | None:
+def estimate_cost(
+    model: str, prompt_tokens: int, completion_tokens: int, pricing: dict
+) -> float | None:
     entry = pricing.get(model)
     if not entry:
         return None
     # Without cache reporting we assume cache miss pricing (upper bound).
-    usd = (
-        prompt_tokens / 1_000_000 * float(entry.get("input_cache_miss", 0))
-        + completion_tokens / 1_000_000 * float(entry.get("output", 0))
-    )
+    usd = prompt_tokens / 1_000_000 * float(
+        entry.get("input_cache_miss", 0)
+    ) + completion_tokens / 1_000_000 * float(entry.get("output", 0))
     return round(usd, 6)
 
 

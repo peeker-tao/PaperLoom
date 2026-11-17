@@ -6,6 +6,56 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-17
+
+### Fixed
+
+- **Translation quality: paragraphs are now real paragraphs.** Three defects
+  combined to make every translation a fragment:
+  - rotated margin stamps (the arXiv/Elsevier download marker) were never
+    filtered, because the rotation lives on each glyph's matrix while the code
+    checked the text line's matrix — which is empty. The stamp's single
+    characters were emitted one per line, interleaved between body lines, so
+    they both broke paragraph merging and got glued onto sentence ends
+    ("… in terms of computational 1").
+  - paragraph continuation was compared against the *first* line of the group,
+    so the next paragraph's indented first line was accepted as a continuation
+    and paragraphs merged into one another.
+  - end-of-line hyphens were always removed, turning `text-` + `to-image` into
+    `textto-image` and destroying the very terms these papers are about. They
+    are now resolved with the document's own vocabulary (and compound
+    continuations such as `state-of-the-` are recognised), with a second repair
+    pass over the merged text.
+- Display type (titles, section headings) is merged on size and spacing instead
+  of left-edge alignment, so a wrapped title is one segment instead of two
+  fragments ("CogView3: Finer and Faster Text-to-Image" + "Generation via
+  Relay Diffusion" previously translated as a garbled half-sentence).
+- Reference lists, display equations, table cells and figure labels are no
+  longer sent to the translator: a `References` heading switches the section to
+  `reference`, `=`-style fragments become `formula`, and runs of terse cells
+  become `table`. This removes garbage output and most of the wasted tokens.
+- Segmentation changes are versioned (`PARSER_VERSION`); a document parsed by an
+  older version is rebuilt transparently and the sidebar says so.
+
+### Changed
+
+- Translation prompt rewritten for completeness, term consistency, academic
+  register, and for reconstructing words broken across lines. Each batch now
+  receives the paper title and the previous paragraph as read-only context.
+- Model output is validated (`too_short` / `no_chinese` / `untranslated` /
+  `truncated`) and retried per segment, so a lazy or truncated answer no longer
+  replaces a paragraph with a two-word "translation".
+- `is_translatable()` is the single rule shared by the job pipeline and the
+  translation-status endpoint; fragments shorter than 12 characters are skipped.
+- Prompt version bumped to 3, so existing translations are reported as outdated
+  and can be refreshed with one click.
+
+### Added
+
+- `scripts/check_segmentation.py` (paragraph/merge quality report) and
+  `scripts/check_translation_quality.py` (runs a real job and prints
+  source/translation pairs with quality flags).
+
 ## [0.1.2] - 2026-11-17
 
 ### Added

@@ -19,17 +19,44 @@ from pdfminer.layout import LAParams, LTChar, LTTextContainer, LTTextLine
 
 log = logging.getLogger("paperloom.pdf")
 
+# Bump whenever segmentation output changes: documents parsed by an older
+# version are transparently re-parsed (their segment ids no longer match).
+PARSER_VERSION = 2
+
 MIN_CHARS_PER_PAGE = 60
+# Lines shorter than this carry no prose and only break paragraph merging.
+# Real headings/labels in papers are longer (e.g. "3 Method" is 8 chars).
+MIN_LINE_CHARS = 3
 SENTENCE_END = tuple(".!?:。！？；;")
 MATH_CHARS = set("∑∫√±≤≥≈∈∂∇αβγθλμσφωΩΔπ×÷≠∞")
+# Math operators that show up in display equations but not in prose.
+MATH_OPERATOR_RE = re.compile(r"[=∼∝∥▷◃⊤⊥⟨⟩→←↔∑∫√±≤≥≈∈∉⊂⊆∂∇^_]")
 CAPTION_RE = re.compile(
     r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE
 )
 SECTION_RE = re.compile(r"^(\d+(\.\d+)*|[IVX]+\.)\s+\S")
 REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
+# Reference lists use many numbering styles; a single line rarely tells, but a
+# run of them does. "1. Achiam, J., Adler, S., ..." is as common as "[12]".
+REFERENCE_ENTRY_RE = re.compile(
+    r"^(?:\[\d{1,3}\]|\d{1,3}\.)\s+[A-Z][A-Za-z'\-]+,"  # 1. Achiam, J.,
+    r"|^\[\d{1,3}\]"
+    r"|^[A-Z][a-z]+,\s+[A-Z]\."
+    r"|^doi:|^arxiv preprint",
+    re.IGNORECASE,
+)
+REFERENCES_HEADING_RE = re.compile(
+    r"^(references?|bibliography|works cited|literature cited)(\s|$)", re.IGNORECASE
+)
+# A heading that ends the reference block and starts real content again.
+POST_REFERENCES_RE = re.compile(
+    r"^(appendix|appendices|supplement|supplementary)\b", re.IGNORECASE
+)
 PAGE_NUMBER_RE = re.compile(r"^\s*(page\s*)?\d{1,4}\s*$", re.IGNORECASE)
 # Author/affiliation blocks: superscript markers, emails, institution words.
-AUTHOR_MARKERS = re.compile(r"[\u2217\u2020\u2021\u00a7\u00b6*\u2020]|\b\d+\s*(?:,|and)\b")
+AUTHOR_MARKERS = re.compile(
+    r"[\u2217\u2020\u2021\u00a7\u00b6*\u2020]|\b\d+\s*(?:,|and)\b"
+)
 AFFILIATION_RE = re.compile(
     r"(universit|institut|laborator|department|school of|college|academy|inc\.|ltd\.|correspond|@[a-z0-9.-]+\.[a-z]{2,})",
     re.IGNORECASE,
@@ -52,6 +79,10 @@ def _is_author_block(text: str) -> bool:
     if len(stripped) > 400:
         return False
     if EMAIL_RE.search(stripped) or AFFILIATION_RE.search(stripped):
+        return True
+    # "{a@mails.,b@mails.}tsinghua.edu.cn" — addresses broken across lines defeat
+    # the strict email pattern, but the at-signs plus a domain are conclusive.
+    if stripped.count("@") >= 1 and re.search(r"\.[a-z]{2,4}\b", stripped):
         return True
     # "Wendi Zheng1∗‡, Jiayan Teng1∗‡, ..." — mostly names + superscripts.
     tokens = [t for t in stripped.split() if t]
@@ -113,6 +144,47 @@ def _line_from_layout(line: LTTextLine, page: int) -> TextLine | None:
     )
 
 
+def _is_rotated(line: LTTextLine) -> bool:
+    """True when the glyphs are rotated relative to the page.
+
+    Margins stamps (the arXiv identifier, "Downloaded by ...", preprint
+    banners) are usually set at 90 degrees. pdfminer exposes the rotation on
+    each ``LTChar.matrix``, not on ``LTTextLine.matrix`` (which is the line's
+    translation and therefore useless here), so the characters must be checked.
+    Rotated text also has to be dropped because it is emitted one glyph at a
+    time, which shreds every paragraph it intersects.
+    """
+    chars = [c for c in line if isinstance(c, LTChar)]
+    if not chars:
+        return False
+    rotated = 0
+    for char in chars:
+        matrix = getattr(char, "matrix", (1, 0, 0, 1, 0, 0))
+        if abs(matrix[1]) > 1e-3 or abs(matrix[2]) > 1e-3:
+            rotated += 1
+    return rotated * 2 > len(chars)
+
+
+def _drop_noise_lines(lines: list[TextLine]) -> list[TextLine]:
+    """Remove fragments that cannot be prose (bare numbers, stray glyphs).
+
+    Such lines are already classified as ``noise`` later, but keeping them to
+    that point corrupts merging: while they sit between two body lines, every
+    ``_can_merge`` check sees the fragment instead of the previous sentence and
+    breaks the paragraph.
+    """
+    kept: list[TextLine] = []
+    for line in lines:
+        text = line.text.strip()
+        if len(text) < MIN_LINE_CHARS:
+            continue
+        # "12.5", "2024" or "-" alone are page furniture, not sentences.
+        if not any(c.isalpha() for c in text):
+            continue
+        kept.append(line)
+    return kept
+
+
 def extract_lines(path: Path) -> tuple[list[TextLine], dict[int, tuple[float, float]]]:
     """Return all horizontal text lines with page dimensions."""
     laparams = LAParams(
@@ -130,9 +202,9 @@ def extract_lines(path: Path) -> tuple[list[TextLine], dict[int, tuple[float, fl
             for child in element:
                 if not isinstance(child, LTTextLine):
                     continue
-                # Skip rotated / vertical text: it breaks reading order.
-                matrix = getattr(child, "matrix", (1, 0, 0, 1, 0, 0))
-                if abs(matrix[1]) > 1e-3 or abs(matrix[2]) > 1e-3:
+                # Rotated text (margin stamps, watermarks) breaks reading order
+                # and, being emitted glyph by glyph, shreds paragraphs.
+                if _is_rotated(child):
                     continue
                 line = _line_from_layout(child, page_number)
                 if line:
@@ -210,33 +282,165 @@ def _drop_running_heads(
     return cleaned
 
 
-def _can_merge(cur: list[TextLine], line: TextLine, median_width: float) -> bool:
+def _can_merge(
+    cur: list[TextLine], line: TextLine, median_width: float, body_size: float = 0.0
+) -> bool:
     prev = cur[-1]
     if prev.page != line.page:
         return False
     if CAPTION_RE.match(line.text) or SECTION_RE.match(line.text):
+        return False
+    # Table cells are short, carry no verb chain, and must not be swallowed into
+    # a paragraph: "Steps Time Cost SDXL [17] ..." is not a sentence. Display
+    # type is exempt: "CogView3: Finer and Faster ..." has no lowercase words
+    # either but is a title, not a cell.
+    display = body_size > 0 and min(prev.size, line.size) >= body_size * 1.12
+    if not display and (
+        _looks_like_table_cell(prev.text) or _looks_like_table_cell(line.text)
+    ):
         return False
     if line.bold and not prev.bold and line.size > prev.size * 1.05:
         return False
     gap = prev.y0 - line.y1
     if gap < -prev.height * 0.4 or gap > max(prev.size, line.size) * 0.9:
         return False
-    # Allow small first-line indentation of a paragraph continuation.
-    if abs(line.x0 - cur[0].x0) > max(60.0, median_width * 0.12):
-        return False
     if prev.size and line.size and not (0.72 <= line.size / prev.size <= 1.38):
         return False
+    # Display type (titles, section headings) is centered or ragged-right, so its
+    # left edge says nothing about continuation, and it is by definition not body
+    # text. Merging on size + spacing keeps a wrapped title in one piece instead
+    # of splitting it into fragments that translate badly on their own.
+    if display:
+        return not (prev.text.endswith(SENTENCE_END) and len(prev.text) > 40)
+    if len(cur) == 1:
+        # The first continuation drops back from the indented first line to the
+        # column edge; only a real block change moves further than that.
+        if abs(line.x0 - cur[0].x0) > max(60.0, median_width * 0.12):
+            return False
+    else:
+        # Paragraph continuation lines all start at the column edge. A line
+        # indented relative to that edge is a new paragraph, and one that is
+        # outdented belongs to a different block (list, footnote, column).
+        edge = min(ln.x0 for ln in cur[1:])
+        delta = line.x0 - edge
+        tolerance = max(6.0, prev.size * 0.85)
+        if delta > tolerance or delta < -tolerance:
+            return False
+    # Text set in a different size than the body is a caption/heading/footnote.
+    if body_size and abs(line.size - body_size) > max(0.8, body_size * 0.12):
+        return False
+    # A short line that closes with punctuation ends the paragraph.
     return not (prev.width < median_width * 0.72 and prev.text.endswith(SENTENCE_END))
 
 
-def _join(a: str, b: str) -> str:
+def _join(a: str, b: str, vocab: set[str] | None = None) -> str:
+    """Join two physical lines, resolving end-of-line hyphens.
+
+    A trailing hyphen is either a typesetting hyphenation ("im-" + "plementing"
+    -> "implementing") or part of a compound ("text-" + "to-image" ->
+    "text-to-image"). Removing it blindly produces "textto-image", which
+    destroys the very terms these papers are about, so the document vocabulary
+    decides and the hyphen is kept when there is no evidence either way.
+    """
     if not a:
         return b
     if a.endswith("-") and b[:1].islower():
-        return a[:-1] + b
+        prefix = a[:-1]
+        head = re.search(r"([A-Za-z]+)$", prefix)
+        tail = re.match(r"([A-Za-z]+)", b)
+        # "state-of-the-" is a compound continuation, never a hyphenation.
+        token = re.search(r"[A-Za-z][A-Za-z-]*$", prefix)
+        compound = bool(token and "-" in token.group(0))
+        if head and tail:
+            joined = (head.group(1) + tail.group(1)).lower()
+            hyphenated = f"{head.group(1)}-{tail.group(1)}".lower()
+            if vocab and hyphenated in vocab and joined not in vocab:
+                return a + b  # compound word: keep the hyphen
+            if vocab and joined in vocab and hyphenated not in vocab:
+                return prefix + b  # real hyphenation: drop it
+            if compound:
+                return a + b
+            # No evidence either way: a very short head ("exe-", "re-", "im-")
+            # is almost always a broken word, a longer one is usually a compound.
+            return prefix + b if len(head.group(1)) <= 3 else a + b
+        return prefix + b
     if re.search(r"[\u4e00-\u9fff]$", a) or re.match(r"^[\u4e00-\u9fff]", b):
         return a + b
     return a + " " + b
+
+
+HYPHEN_TOKEN_RE = re.compile(r"\b([A-Za-z]{2,})-([a-z]{2,})\b")
+
+
+def _repair_hyphenation(text: str, vocab: set[str]) -> str:
+    """Resolve leftovers such as "exe-cuting" using the document vocabulary.
+
+    Only touches tokens whose hyphenated form never occurs in the document while
+    the glued form does, so legitimate compounds such as ``text-to`` or
+    ``super-resolution`` are preserved.
+    """
+    if not vocab:
+        return text
+
+    def fix(match: re.Match) -> str:
+        whole = match.group(0)
+        glued = match.group(1) + match.group(2)
+        if whole.lower() in vocab:
+            return whole
+        if glued.lower() in vocab:
+            return glued
+        return whole
+
+    return HYPHEN_TOKEN_RE.sub(fix, text)
+
+
+def _document_vocab(lines: Iterable[TextLine]) -> set[str]:
+    """Lowercased word forms, used only to resolve end-of-line hyphens."""
+    vocab: set[str] = set()
+    for line in lines:
+        for token in re.findall(r"[A-Za-z][A-Za-z-]*[A-Za-z]", line.text):
+            vocab.add(token.lower())
+    return vocab
+
+
+def _looks_bibliographic(text: str) -> bool:
+    """True for a bibliography entry, whatever numbering style is used.
+
+    Translating a reference list wastes tokens and produces text nobody reads,
+    so these are excluded from translation (they stay visible in the PDF).
+    """
+    stripped = text.strip()
+    if len(stripped) < 20 or len(stripped) > 2000:
+        return False
+    if not REFERENCE_ENTRY_RE.match(stripped):
+        return False
+    # A bibliographic entry carries a venue, a year or a volume.
+    return bool(
+        re.search(r"\((?:19|20)\d{2}[a-z]?\)", stripped)
+        or re.search(r"\bpp?\.\s*\d", stripped)
+        or re.search(r"arXiv[:\s]|doi[:\.]|vol\.\s*\d|Proceedings|Conference", stripped)
+    )
+
+
+def _mark_reference_sections(segments: list[dict]) -> None:
+    """Flag everything under a "References" heading as ``reference``.
+
+    Per-segment detection misses entries whose numbering style is unusual, and a
+    heading plus a run of entries is a far stronger signal.
+    """
+    in_references = False
+    for seg in segments:
+        text = seg["text"].strip()
+        kind = seg["kind"]
+        if kind == "heading" or len(text) < 40:
+            if REFERENCES_HEADING_RE.match(text):
+                in_references = True
+                continue
+            if in_references and POST_REFERENCES_RE.match(text):
+                in_references = False
+                continue
+        if in_references and kind not in {"title", "heading"}:
+            seg["kind"] = "reference"
 
 
 def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
@@ -261,11 +465,79 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
         return "heading"
     if pages and page >= pages * 0.75 and REFERENCE_RE.match(text):
         return "reference"
+    if page >= 2 and _looks_bibliographic(text):
+        return "reference"
+    if _is_math_fragment(text):
+        return "formula"
     if len(text) < 200 and _math_ratio(text) >= 0.12:
         return "formula"
     if page == 1 and re.match(r"^abstract\b", text, re.IGNORECASE):
         return "abstract"
     return "body"
+
+
+def _is_math_fragment(text: str) -> bool:
+    """True for display equations and their fragments.
+
+    Such text must not be translated: it carries no prose, and sending it to the
+    model produces gibberish that also displaces real paragraphs in a batch.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    words = re.findall(r"[A-Za-z]{2,}", stripped)
+    # "q(zt|z0) = N (zt|F (x0, t), σt" — an operator with almost no words.
+    if MATH_OPERATOR_RE.search(stripped) and len(words) <= 6:
+        return True
+    if _math_ratio(stripped) >= 0.06:
+        return True
+    # Equation number on its own, e.g. "(3)".
+    return bool(re.fullmatch(r"\(\s*\d{1,3}[a-z]?\s*\)", stripped))
+
+
+def _looks_like_table_cell(text: str) -> bool:
+    """True for a short cell such as "SDXL [17]" or "Steps Time Cost".
+
+    Cells are terse, contain no sentence verb chain, and are usually a model or
+    dataset name: translating them in isolation invents meaning that is not
+    there.
+    """
+    stripped = text.strip()
+    if not (0 < len(stripped) < 80):
+        return False
+    if stripped.endswith(tuple(".!?:;。！？；")):
+        return False
+    # Metric headers such as "Aes↑ HPS v2↑ ImageReward↑" are never prose.
+    if re.search(r"[↑↓▲▼]", stripped):
+        return True
+    tokens = [t for t in stripped.split() if t]
+    if not tokens:
+        return False
+    lowercase_words = [t for t in tokens if re.fullmatch(r"[a-z]{2,}", t)]
+    has_digit = any(c.isdigit() for c in stripped)
+    return not lowercase_words or (has_digit and len(lowercase_words) <= 1)
+
+
+def _mark_layout_fragments(segments: list[dict]) -> None:
+    """Reclassify equation fragments and table cells after merging.
+
+    A page-level pass is needed for tables: an isolated short label is often a
+    real (if short) sentence, while a run of them is a table.
+    """
+    by_page: dict[int, list[dict]] = {}
+    for seg in segments:
+        by_page.setdefault(seg["page"], []).append(seg)
+    for page_segments in by_page.values():
+        cell_candidates = [
+            seg
+            for seg in page_segments
+            if seg["kind"] == "body" and _looks_like_table_cell(seg["text"])
+        ]
+        # A table has several such cells; a lone short label is usually a
+        # sentence, so require company before flagging them.
+        if len(cell_candidates) >= 3:
+            for seg in cell_candidates:
+                seg["kind"] = "table"
 
 
 def _math_ratio(text: str) -> float:
@@ -275,14 +547,23 @@ def _math_ratio(text: str) -> float:
     return sum(1 for c in meaningful if c in MATH_CHARS) / len(meaningful)
 
 
-def _merge_page(lines: list[TextLine], page: int, body_size: float) -> list[dict]:
+def _merge_page(
+    lines: list[TextLine], page: int, body_size: float, vocab: set[str] | None = None
+) -> list[dict]:
     if not lines:
         return []
-    widths = [ln.width for ln in lines if ln.width > 0]
+    # Measure the body column only: titles, captions and short heading lines
+    # would drag the median down and reject valid continuations.
+    body_widths = [
+        ln.width
+        for ln in lines
+        if ln.width > 0 and abs(ln.size - body_size) <= max(0.8, body_size * 0.12)
+    ]
+    widths = body_widths or [ln.width for ln in lines if ln.width > 0]
     median_width = statistics.median(widths) if widths else 300.0
     groups: list[list[TextLine]] = []
     for line in lines:
-        if groups and _can_merge(groups[-1], line, median_width):
+        if groups and _can_merge(groups[-1], line, median_width, body_size):
             groups[-1].append(line)
         else:
             groups.append([line])
@@ -292,7 +573,9 @@ def _merge_page(lines: list[TextLine], page: int, body_size: float) -> list[dict
         first, _last = group[0], group[-1]
         text = first.text
         for line in group[1:]:
-            text = _join(text, line.text)
+            text = _join(text, line.text, vocab)
+        if vocab:
+            text = _repair_hyphenation(text, vocab)
         seg = {
             "id": f"p{page}-s{index}",
             "page": page,
@@ -318,6 +601,10 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     if not path.exists():
         raise FileNotFoundError(str(path))
     lines, sizes = extract_lines(path)
+    # Fragments (bare numbers, stray glyphs) must go before merging, otherwise
+    # they interrupt every paragraph they sit between.
+    lines = _drop_noise_lines(lines)
+    vocab = _document_vocab(lines)
     page_count = max(sizes) if sizes else 1
     by_page: dict[int, list[TextLine]] = {p: [] for p in sizes}
     for line in lines:
@@ -327,12 +614,14 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     ordered = {
         p: _order_page(by_page.get(p, []), sizes.get(p, (612.0, 0))[0]) for p in sizes
     }
+    # Body text dominates the page, so the median of all line sizes is the body
+    # size; caps and headings are the outliers.
     all_sizes = [ln.size for p in ordered for ln in ordered[p] if ln.size > 0]
     body_size = statistics.median(all_sizes) if all_sizes else 10.0
 
     segments: list[dict] = []
     for page in sorted(ordered):
-        page_segments = _merge_page(ordered[page], page, body_size)
+        page_segments = _merge_page(ordered[page], page, body_size, vocab)
         for seg in page_segments:
             seg["kind"] = _classify(seg, page, page_count, body_size)
             segments.append(seg)
@@ -345,11 +634,11 @@ def parse_pdf(path: Path, title: str = "") -> dict:
             prev
             and prev["page"] == seg["page"] - 1
             and not prev["text"].rstrip().endswith(SENTENCE_END)
-            and re.match(r"^[a-z(]", seg["text"])
+            and re.match(r"^[a-z0-9(\[]", seg["text"])
             and prev["kind"] in {"body", "abstract"}
             and seg["kind"] in {"body", "abstract"}
         ):
-            prev["text"] = _join(prev["text"], seg["text"])
+            prev["text"] = _join(prev["text"], seg["text"], vocab)
             prev["bbox"] = [
                 min(prev["bbox"][0], seg["bbox"][0]),
                 prev["bbox"][1],
@@ -359,6 +648,12 @@ def parse_pdf(path: Path, title: str = "") -> dict:
             prev["align"] = "merged"
             continue
         merged_segments.append(seg)
+
+    # A "References" heading plus a run of entries is far more reliable than
+    # per-segment pattern matching: translating a bibliography helps nobody.
+    _mark_reference_sections(merged_segments)
+    # Equations and table cells look like short "body" paragraphs otherwise.
+    _mark_layout_fragments(merged_segments)
 
     # Re-number ids sequentially so they remain stable and readable.
     for index, seg in enumerate(merged_segments):
@@ -394,6 +689,7 @@ def parse_pdf(path: Path, title: str = "") -> dict:
         "text_chars": extracted_chars,
         "coverage": round(coverage, 3),
         "file_hash": file_sha256(path),
+        "parser_version": PARSER_VERSION,
     }
 
 

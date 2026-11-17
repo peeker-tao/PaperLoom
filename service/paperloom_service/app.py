@@ -48,8 +48,8 @@ from .models import (
     TranslateRequest,
 )
 from .pdf.babeldoc import engine_info
-from .pdf.extract import file_sha256, parse_pdf
-from .translate import SKIP_KINDS, _has_prose, document_id_for
+from .pdf.extract import PARSER_VERSION, file_sha256, parse_pdf
+from .translate import document_id_for, is_translatable
 from .translation_config import TranslationConfig, evaluate
 from .urls import OFFICIAL_BASE_URL, check_base_url, normalize_base_url
 
@@ -304,9 +304,15 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             if not check.ok:
                 return {
                     "ok": False,
-                    "error": {"code": "bad_base_url", "message": check.message, "retryable": False},
+                    "error": {
+                        "code": "bad_base_url",
+                        "message": check.message,
+                        "retryable": False,
+                    },
                 }
-            settings = Settings(**{**state.settings.public(), "base_url": check.normalized})
+            settings = Settings(
+                **{**state.settings.public(), "base_url": check.normalized}
+            )
             client = state.client(settings)
         else:
             client = state.client()
@@ -353,7 +359,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             req.library_id, req.item_key, req.attachment_key, file_hash
         )
         existing = state.db.get_document(doc_id)
-        if existing and existing["file_hash"] == file_hash and not req.force:
+        # A stale parser version means the stored segments come from an older
+        # segmentation algorithm (e.g. before margin stamps were filtered); they
+        # must be rebuilt, otherwise the broken paragraphs persist forever.
+        stale_parse = bool(
+            existing
+            and int(existing.get("parser_version") or 0) != PARSER_VERSION
+        )
+        if existing and existing["file_hash"] == file_hash and not req.force and not stale_parse:
             segs = state.db.get_segments(doc_id)
             return {
                 "document": state.document_payload(existing),
@@ -383,6 +396,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "alignment_note": parsed["alignment_note"],
             "scanned": parsed["scanned"],
             "text_chars": parsed["text_chars"],
+            "parser_version": parsed["parser_version"],
         }
         state.db.upsert_document(base)
         state.db.replace_segments(doc_id, parsed["segments"])
@@ -392,6 +406,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "segmentCount": len(parsed["segments"]),
             "coverage": parsed["coverage"],
             "cached": False,
+            "reparsed": stale_parse,
         }
 
     @app.get("/v1/documents")
@@ -435,6 +450,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "alignment_note": parsed["alignment_note"],
                 "scanned": parsed["scanned"],
                 "text_chars": parsed["text_chars"],
+                "parser_version": parsed["parser_version"],
             }
         )
         state.db.replace_segments(document_id, parsed["segments"])
@@ -459,8 +475,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         status = evaluate(
             segments,
             config,
-            translatable=lambda seg: seg.get("kind") not in SKIP_KINDS
-            and _has_prose(seg["text"]),
+            translatable=is_translatable,
         )
         payload = status.as_dict()
         payload["config"] = config.as_dict()

@@ -8,7 +8,7 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 118 passed in ~9s
+# 131 passed in ~9s
 
 .\.venv\Scripts\python.exe -m ruff check service scripts
 # All checks passed!
@@ -16,22 +16,23 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 8 passed
-node esbuild.config.mjs                         # content/plugin.js ~241 KB, content/prefs.js ~15 KB
+node esbuild.config.mjs                         # content/plugin.js ~243 KB, content/prefs.js ~17 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（118 项）
+### 服务端覆盖（131 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
 | `test_service.py` | 鉴权、注册/缓存、任务（进度/取消/重试）、SSE 问答、引用校验、六种分析模板、术语、FTS5、按页翻译 | ✅ |
-| `test_pdf.py` | 段落合并、双栏阅读顺序、扫描件识别、`meta`/`noise` 分类、coverage 上限 | ✅ |
+| `test_pdf.py` | 段落合并、双栏阅读顺序、扫描件识别、`meta`/`noise` 分类、coverage 上限、**旋转水印过滤**、**连字符接续（`im-`+`plementing` vs `text-`+`to-image`）**、缩进首行分新段、公式/表格/参考文献分类、`PARSER_VERSION` 记录 | ✅ 14 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
 | `test_translation_config.py` | 生成配置身份、过期判定、无出处历史行按需重译 | ✅ |
 | `test_urls.py` | Base URL 归一化、`/v1` 只出现一次、粘贴完整端点时的纠正 | ✅ |
 | `test_context.py` | 上下文范围（选区/章节/整篇）、未知引用剔除 | ✅ |
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
+| `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
 
 ### 插件侧（8 项）
 
@@ -58,20 +59,72 @@ node esbuild.config.mjs                         # content/plugin.js ~241 KB, con
 - 作者/单位行与单字符碎片被送去翻译（现归为 `meta` / `noise`）。
 - 只有标题没有正文的段落导致覆盖率为 0 且不扩段；`coverage` 超过 1.0 未截断。
 
+## 分段质量（译文质量的前提）
+
+同一个 21 页真实论文（CogView3），修复前后对比：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_segmentation.py "<paper>.pdf"
+```
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 总分段数 | 421 | 370 |
+| 可翻译段 | 243（含整页参考文献、表格单元、公式碎片） | 146（prose 58） |
+| prose 中位长度 | 56 字符（≈ 单行） | 381 字符（真实段落） |
+| 以句末标点结尾的 prose | 43% | 78% |
+| 正文之间未合并的断句 | 74 | 2 |
+| 残留断词连字符 | 145 | 0 |
+| 泄漏的页面水印 | 有（arXiv 编号逐字插入正文） | 0 |
+
+关键原因：① 页边距的 90° 水印逐字符成行、插在正文行之间；② 缩进判断拿"组首行"比较，
+导致下一段被当作续行；③ 行尾连字符被一律删除（`text-`+`to-image` → `textto-image`）。
+现在水印按**字符矩阵**过滤，连字符依据全文词表判定（复合词保留、断词合并），
+并在合并后做一次词表修复。
+
+`RESULT: PASS` 表示：prose 结尾标点 ≥75%、正文断句 ≤15%、无残留断词、无泄漏水印。
+（约 22% 的 prose 合法地在公式或分页处被切断——正文围绕公式线性抽取，重排会破坏与
+PDF 的位置对应。）
+
+### 真实译文对照
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_translation_quality.py --pdf "<paper>.pdf" --pages 1-4
+```
+
+修复前（第 1 页摘要被切成 10 段，逐行翻译）：
+
+```
+SRC: Abstract. Recent advancements in text-to-image generative systems
+DST: 摘要。近期文本到图像生成系统的进展
+SRC: have been largely driven by diffusion models. However, single-stage text-
+DST: 在很大程度上由扩散模型推动。然而，单阶段文本-
+```
+
+修复后（整段一次翻译，术语与引用完整）：
+
+```
+DST: 摘要。近期文本到图像生成系统的进展在很大程度上由扩散模型驱动。然而，单阶段文本到
+     图像扩散模型在计算效率和图像细节精修方面仍面临挑战。为解决该问题，我们提出 CogView3，
+     一种创新的级联框架，可增强文本到图像扩散的性能。CogView3 是首个在文本到图像生成领域
+     实现接力扩散（relay diffusion）的模型……推理时间仅需其约 1/2。
+```
+
+同一任务：30 段、3905 prompt / 1581 completion token、约 $0.0031；长度比中位 0.33
+（英译中正常范围），无 `too_short` / `no_chinese` 标记。
+
 ## 真实论文的叠层几何校验
 
-对一篇 21 页、421 段的真实论文（CogView3）执行：
+对同一篇 21 页真实论文执行：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_overlay.py --document-id <id> --token <token>
-# segments per page: min=1 max=97
-# kinds: {'title':1,'noise':221,'heading':28,'meta':5,'body':143,'abstract':1,'caption':22}
-# translated: 23/421
 # PASS: every bbox maps to a valid overlay inside the page
 ```
 
 结论：所有带译文的段落 bbox 都在页面范围内，按 `scale = 渲染宽度 / 页面宽度` 换算后
-不越界、不小于可读尺寸。`noise` 段（公式碎片、行号）不参与翻译，默认在界面隐藏。
+不越界、不小于可读尺寸。公式碎片、表格单元与参考文献不参与翻译，
+双语视图只叠放已译段落。
 
 `scripts/preview_overlay.py` 可生成同时含原页与译文叠层的独立 HTML，用于人工视觉核对；
 注意 VS Code 内置浏览器无法完成 pdf.js 画布渲染（页面空白是该环境限制），
