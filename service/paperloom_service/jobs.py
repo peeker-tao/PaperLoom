@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
 
 from .config import RuntimeConfig, Settings
 from .db import Database, now
@@ -248,7 +248,7 @@ class JobManager:
             self._fail(job_id, exc.code, exc.message, exc.retryable)
         except DeepSeekError as exc:
             self._fail(job_id, exc.code, exc.message, exc.retryable)
-        except Exception as exc:  # noqa: BLE001 - job boundary must not crash the service
+        except Exception as exc:
             log.exception("job %s crashed", job_id)
             self._fail(job_id, "internal", f"内部错误：{exc}", True)
         finally:
@@ -290,7 +290,6 @@ class JobManager:
 
     def _emit(self, job_id: str, event: str, data: dict) -> None:
         seq = self._append_event(job_id, event, data)
-        payload = {"seq": seq, **data}
         for queue in list(self._subscribers.get(job_id, ())):
             try:
                 queue.put_nowait({"seq": seq, "event": event, "data": data})

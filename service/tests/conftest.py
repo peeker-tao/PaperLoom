@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import httpx
 import pytest
@@ -33,7 +33,10 @@ async def client(cfg) -> AsyncIterator[httpx.AsyncClient]:
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
-            transport=transport, base_url="http://paperloom.test", headers=HEADERS, timeout=30
+            transport=transport,
+            base_url="http://paperloom.test",
+            headers=HEADERS,
+            timeout=30,
         ) as http:
             yield http
 
@@ -58,7 +61,9 @@ async def register(client: httpx.AsyncClient, pdf_path) -> dict:
     return response.json()
 
 
-async def wait_job(client: httpx.AsyncClient, job_id: str, timeout: float = 15.0) -> dict:
+async def wait_job(
+    client: httpx.AsyncClient, job_id: str, timeout: float = 15.0
+) -> dict:
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:
         response = await client.get(f"/v1/jobs/{job_id}")

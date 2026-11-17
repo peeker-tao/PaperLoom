@@ -33,7 +33,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-dist
-          path: plugin/dist
+          path: plugin/content
           if-no-files-found: error
 
   service:

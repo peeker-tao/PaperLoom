@@ -99,7 +99,9 @@ class SettingsPatch(BaseModel):
     chat_model: str | None = Field(default=None, alias="chatModel")
     analysis_model: str | None = Field(default=None, alias="analysisModel")
     timeout_seconds: float | None = Field(default=None, alias="timeoutSeconds")
-    connect_timeout_seconds: float | None = Field(default=None, alias="connectTimeoutSeconds")
+    connect_timeout_seconds: float | None = Field(
+        default=None, alias="connectTimeoutSeconds"
+    )
     concurrency: int | None = None
     qps: float | None = None
     max_retries: int | None = Field(default=None, alias="maxRetries")

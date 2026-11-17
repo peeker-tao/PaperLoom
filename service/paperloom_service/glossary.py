@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from .deepseek import DeepSeekClient, DeepSeekError
+from .deepseek import DeepSeekClient
 
 GLOSSARY_SYSTEM = (
     "你是学术翻译术语库构建器。只输出 JSON。"

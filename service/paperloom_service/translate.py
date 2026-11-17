@@ -11,8 +11,9 @@ from pathlib import Path
 from .config import RuntimeConfig, Settings, estimate_cost, load_pricing
 from .db import Database
 from .deepseek import DeepSeekClient, DeepSeekError
-from .glossary import glossary_block, glossary_signature, parse_terms_json
-from .pdf.babeldoc import EngineMissing, translate_pdf as babeldoc_translate
+from .glossary import glossary_block, glossary_signature
+from .pdf.babeldoc import EngineMissing
+from .pdf.babeldoc import translate_pdf as babeldoc_translate
 from .pdf.extract import parse_pdf
 
 log = logging.getLogger("paperloom.translate")
@@ -50,7 +51,7 @@ def document_id_for(library_id: str, item_key: str, attachment_key: str, file_ha
 
 
 def _cache_key(model: str, signature: str, text: str) -> str:
-    return hashlib.sha1(f"{model}|{signature}|{text}".encode("utf-8")).hexdigest()
+    return hashlib.sha1(f"{model}|{signature}|{text}".encode()).hexdigest()
 
 
 def _batches(segments: list[dict]) -> list[list[dict]]:
@@ -259,16 +260,13 @@ async def translate_document(
     for batch in _batches(pending):
         if cancel_token and cancel_token.is_set():
             raise TranslationCancelled()
-        try:
-            translations, batch_usage = await _translate_batch(
-                client,
-                batch,
-                model=model,
-                terms=terms,
-                max_tokens=min(settings.max_output_tokens, 4096),
-            )
-        except DeepSeekError:
-            raise
+        translations, batch_usage = await _translate_batch(
+            client,
+            batch,
+            model=model,
+            terms=terms,
+            max_tokens=min(settings.max_output_tokens, 4096),
+        )
         for key in ("promptTokens", "completionTokens"):
             usage[key] += batch_usage.get(key, 0)
         usage["estimated"] = usage["estimated"] or batch_usage.get("estimated", False)

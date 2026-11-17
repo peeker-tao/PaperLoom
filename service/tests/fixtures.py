@@ -48,7 +48,9 @@ def make_pdf(path: Path, pages: list[list[tuple[float, float, float, str]]]) -> 
         )
         kids.append(f"{page_obj} 0 R")
     objects[pages_obj - 1] = (
-        f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode("latin-1")
+        f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>".encode(
+            "latin-1"
+        )
     )
     objects[catalog - 1] = b"<< /Type /Catalog /Pages 2 0 R >>"
 
@@ -70,7 +72,9 @@ def make_pdf(path: Path, pages: list[list[tuple[float, float, float, str]]]) -> 
     return path
 
 
-def body_page(paragraphs: list[str], *, start_y: float = 700.0) -> list[tuple[float, float, float, str]]:
+def body_page(
+    paragraphs: list[str], *, start_y: float = 700.0
+) -> list[tuple[float, float, float, str]]:
     lines: list[tuple[float, float, float, str]] = []
     y = start_y
     for paragraph in paragraphs:
@@ -95,7 +99,12 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines
 
 
-def paper_pdf(path: Path, *, pages: int = 2, title: str = "Looming Attention for Efficient Retrieval") -> Path:
+def paper_pdf(
+    path: Path,
+    *,
+    pages: int = 2,
+    title: str = "Looming Attention for Efficient Retrieval",
+) -> Path:
     content: list[list[tuple[float, float, float, str]]] = []
     first = [(72.0, 740.0, 16.0, title)]
     first += body_page(
@@ -122,10 +131,16 @@ def paper_pdf(path: Path, *, pages: int = 2, title: str = "Looming Attention for
 
 
 def two_column_pdf(path: Path) -> Path:
-    page: list[tuple[float, float, float, str]] = [(72.0, 740.0, 14.0, "A Two Column Paper")]
+    page: list[tuple[float, float, float, str]] = [
+        (72.0, 740.0, 14.0, "A Two Column Paper")
+    ]
     for index in range(8):
-        page.append((72.0, 700.0 - index * 14, 10.0, f"Left column line {index} keeps talking."))
-        page.append((330.0, 700.0 - index * 14, 10.0, f"Right column line {index} is separate."))
+        page.append(
+            (72.0, 700.0 - index * 14, 10.0, f"Left column line {index} keeps talking.")
+        )
+        page.append(
+            (330.0, 700.0 - index * 14, 10.0, f"Right column line {index} is separate.")
+        )
     return make_pdf(path, [page])
 
 

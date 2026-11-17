@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import SERVICE_API_VERSION, __version__
-from .analysis import build_analysis_context, build_messages as build_analysis_messages
-from .analysis import validate_multi_citations
+from .analysis import build_analysis_context, validate_multi_citations
+from .analysis import build_messages as build_analysis_messages
 from .config import (
     RuntimeConfig,
     Settings,
@@ -90,7 +90,11 @@ class AppState:
     def require_key(self) -> None:
         import os
 
-        if not self.key_configured() and os.environ.get("PAPERLOOM_FAKE_LLM", "") in ("", "0", "false"):
+        if not self.key_configured() and os.environ.get("PAPERLOOM_FAKE_LLM", "") in (
+            "",
+            "0",
+            "false",
+        ):
             raise HTTPException(
                 status_code=412,
                 detail={
@@ -102,7 +106,9 @@ class AppState:
     def doc_or_404(self, document_id: str) -> dict:
         doc = self.db.get_document(document_id)
         if not doc:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "文档未注册"})
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "文档未注册"}
+            )
         return doc
 
     def document_payload(self, doc: dict) -> dict:
@@ -127,7 +133,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         state.db.migrate()
-        state.jobs = JobManager(state.db, state.cfg, lambda: state.settings, lambda: state.client())
+        state.jobs = JobManager(
+            state.db, state.cfg, lambda: state.settings, lambda: state.client()
+        )
         await state.jobs.recover()
         (cfg.data_dir / "service.json").write_text(
             json.dumps(
@@ -147,7 +155,12 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             ),
             encoding="utf-8",
         )
-        log.info("PaperLoom service %s ready on http://%s:%s", __version__, cfg.host, cfg.port)
+        log.info(
+            "PaperLoom service %s ready on http://%s:%s",
+            __version__,
+            cfg.host,
+            cfg.port,
+        )
         try:
             yield
         finally:
@@ -200,10 +213,13 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
 
     @app.get("/v1/status")
     async def status():
+        from .deepseek import fake_mode
+
         return {
             "version": __version__,
             "apiVersion": SERVICE_API_VERSION,
             "dataDir": str(cfg.data_dir),
+            "llm": "fake" if fake_mode() else "live",
             "apiKey": api_key_status(cfg),
             "capabilities": {
                 "babeldoc": engine_info(),
@@ -225,8 +241,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "apiKey": api_key_status(cfg),
             "pricing": load_pricing(cfg),
             "models": [
-                {"id": "deepseek-flash", "label": "DeepSeek Flash（1M 上下文，支持图片）"},
-                {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（推理更强，无图片）"},
+                {
+                    "id": "deepseek-flash",
+                    "label": "DeepSeek Flash（1M 上下文，支持图片）",
+                },
+                {
+                    "id": "deepseek-v4-pro",
+                    "label": "DeepSeek V4 Pro（推理更强，无图片）",
+                },
             ],
             "service": {"version": __version__, "apiVersion": SERVICE_API_VERSION},
         }
@@ -245,7 +267,10 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             else:
                 clear_api_key(cfg)
         return {
-            "settings": {**state.settings.public(), "baseUrlDefault": "https://api.deepseek.com"},
+            "settings": {
+                **state.settings.public(),
+                "baseUrlDefault": "https://api.deepseek.com",
+            },
             "apiKey": api_key_status(cfg),
         }
 
@@ -276,23 +301,29 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         path = Path(req.pdf_path).expanduser()
         if not path.is_absolute():
             raise HTTPException(
-                status_code=400, detail={"code": "bad_path", "message": "pdfPath 必须是绝对路径"}
+                status_code=400,
+                detail={"code": "bad_path", "message": "pdfPath 必须是绝对路径"},
             )
         if path.suffix.lower() != ".pdf":
             raise HTTPException(
-                status_code=400, detail={"code": "bad_path", "message": "仅支持 PDF 文件"}
+                status_code=400,
+                detail={"code": "bad_path", "message": "仅支持 PDF 文件"},
             )
         if not path.exists() or not path.is_file():
             raise HTTPException(
-                status_code=400, detail={"code": "file_missing", "message": f"文件不存在：{path}"}
+                status_code=400,
+                detail={"code": "file_missing", "message": f"文件不存在：{path}"},
             )
         if path.stat().st_size > 2 * 1024 * 1024 * 1024:
             raise HTTPException(
-                status_code=400, detail={"code": "too_large", "message": "PDF 超过 2GB 限制"}
+                status_code=400,
+                detail={"code": "too_large", "message": "PDF 超过 2GB 限制"},
             )
 
         file_hash = req.file_hash or await asyncio.to_thread(file_sha256, path)
-        doc_id = document_id_for(req.library_id, req.item_key, req.attachment_key, file_hash)
+        doc_id = document_id_for(
+            req.library_id, req.item_key, req.attachment_key, file_hash
+        )
         existing = state.db.get_document(doc_id)
         if existing and existing["file_hash"] == file_hash and not req.force:
             segs = state.db.get_segments(doc_id)
@@ -304,7 +335,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
 
         try:
             parsed = await asyncio.to_thread(parse_pdf, path, req.title)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.exception("parse failed")
             raise HTTPException(
                 status_code=422,
@@ -362,7 +393,8 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         pdf_path = Path(doc.get("pdf_path", ""))
         if not pdf_path.exists():
             raise HTTPException(
-                status_code=400, detail={"code": "file_missing", "message": "PDF 文件已被移动或删除"}
+                status_code=400,
+                detail={"code": "file_missing", "message": "PDF 文件已被移动或删除"},
             )
         parsed = await asyncio.to_thread(parse_pdf, pdf_path, doc.get("title", ""))
         state.db.upsert_document(
@@ -379,7 +411,10 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         )
         state.db.replace_segments(document_id, parsed["segments"])
         updated = state.db.get_document(document_id) or doc
-        return {"document": state.document_payload(updated), "segmentCount": len(parsed["segments"])}
+        return {
+            "document": state.document_payload(updated),
+            "segmentCount": len(parsed["segments"]),
+        }
 
     # ------------------------------------------------------------------ #
     # Jobs
@@ -406,13 +441,17 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     async def get_job(job_id: str):
         job = state.db.get_job(job_id)
         if not job:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "任务不存在"})
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "任务不存在"}
+            )
         return {"job": job}
 
     @app.get("/v1/jobs/{job_id}/events")
     async def job_events(job_id: str, after: int = -1):
         if not state.db.get_job(job_id):
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "任务不存在"})
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "任务不存在"}
+            )
         return StreamingResponse(
             manager().stream(job_id, after),
             media_type="text/event-stream",
@@ -444,16 +483,23 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     async def job_artifact(job_id: str, kind: str):
         job = state.db.get_job(job_id)
         if not job:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "任务不存在"})
-        artifact = next((a for a in job.get("artifacts") or [] if a.get("kind") == kind), None)
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "任务不存在"}
+            )
+        artifact = next(
+            (a for a in job.get("artifacts") or [] if a.get("kind") == kind), None
+        )
         if not artifact:
             raise HTTPException(
-                status_code=404, detail={"code": "no_artifact", "message": f"没有 {kind} 产物"}
+                status_code=404,
+                detail={"code": "no_artifact", "message": f"没有 {kind} 产物"},
             )
         path = Path(artifact["path"]).resolve()
         root = cfg.files_dir.resolve()
         if root not in path.parents and path != root:
-            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "非法路径"})
+            raise HTTPException(
+                status_code=403, detail={"code": "forbidden", "message": "非法路径"}
+            )
         if not path.exists():
             raise HTTPException(
                 status_code=410, detail={"code": "gone", "message": "产物文件已被清理"}
@@ -471,14 +517,21 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         if not segments:
             raise HTTPException(
                 status_code=409,
-                detail={"code": "not_parsed", "message": "论文尚未解析，请先翻译或重新解析"},
+                detail={
+                    "code": "not_parsed",
+                    "message": "论文尚未解析，请先翻译或重新解析",
+                },
             )
         if not req.messages:
-            raise HTTPException(status_code=400, detail={"code": "no_message", "message": "消息为空"})
+            raise HTTPException(
+                status_code=400, detail={"code": "no_message", "message": "消息为空"}
+            )
 
         settings = state.settings
         selection = req.selection.model_dump() if req.selection else None
-        question = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+        question = next(
+            (m.content for m in reversed(req.messages) if m.role == "user"), ""
+        )
         ctx = build_context(
             segments,
             scope=req.scope,
@@ -487,10 +540,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             question=question,
         )
         conversation_id = req.conversation_id or uuid.uuid4().hex[:16]
-        state.db.ensure_conversation(conversation_id, req.document_id, title=question[:80])
+        state.db.ensure_conversation(
+            conversation_id, req.document_id, title=question[:80]
+        )
 
         history = state.db.get_messages(conversation_id)
-        if not any(m["role"] == "user" and m["content"] == question for m in history[-5:]):
+        if not any(
+            m["role"] == "user" and m["content"] == question for m in history[-5:]
+        ):
             state.db.add_message(
                 {
                     "id": uuid.uuid4().hex,
@@ -506,16 +563,16 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         if ctx.get("note"):
             context_block += f"\n（定位说明：{ctx['note']}）"
         system = (
-            CHAT_SYSTEM
-            + f"\n\n当前上下文范围：{req.scope}。"
-            + "\n\n" + context_block
+            CHAT_SYSTEM + f"\n\n当前上下文范围：{req.scope}。" + "\n\n" + context_block
         )
         messages = [{"role": "system", "content": system}]
         for item in req.messages[-12:]:
             if item.role == "system":
                 continue
             messages.append({"role": item.role, "content": item.content})
-        if not any(m["role"] == "user" and m["content"] == question for m in messages[-2:]):
+        if not any(
+            m["role"] == "user" and m["content"] == question for m in messages[-2:]
+        ):
             messages.append({"role": "user", "content": question})
 
         model = req.model or settings.chat_model
@@ -589,7 +646,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 {
                     "conversationId": conversation_id,
                     "text": cleaned,
-                    "status": "failed" if error else ("cancelled" if cancelled else "done"),
+                    "status": (
+                        "failed" if error else ("cancelled" if cancelled else "done")
+                    ),
                     "usage": final_usage,
                     "model": model,
                 },
@@ -609,7 +668,8 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         state.require_key()
         if not req.document_ids:
             raise HTTPException(
-                status_code=400, detail={"code": "no_documents", "message": "未选择论文"}
+                status_code=400,
+                detail={"code": "no_documents", "message": "未选择论文"},
             )
         for document_id in req.document_ids:
             state.doc_or_404(document_id)
@@ -663,7 +723,11 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
 
             raw = "".join(buffer)
             cleaned, citations = validate_multi_citations(raw, marker_map)
-            final_usage = usage or {"promptTokens": 0, "completionTokens": 0, "estimated": True}
+            final_usage = usage or {
+                "promptTokens": 0,
+                "completionTokens": 0,
+                "estimated": True,
+            }
             if cleaned and not error:
                 state.db.save_analysis(
                     {
@@ -730,7 +794,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     async def patch_term(term_id: str, patch: TermPatch):
         terms = {t["id"]: t for t in state.db.list_terms()}
         if term_id not in terms:
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "术语不存在"})
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "术语不存在"}
+            )
         current = terms[term_id]
         updated = state.db.upsert_term(
             {
@@ -740,7 +806,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "target": patch.target or current["target"],
                 "scope": current["scope"],
                 "status": patch.status or current["status"],
-                "note": patch.note if patch.note is not None else current.get("note", ""),
+                "note": (
+                    patch.note if patch.note is not None else current.get("note", "")
+                ),
             }
         )
         return {"term": updated}
@@ -748,7 +816,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.delete("/v1/glossary/{term_id}")
     async def delete_term(term_id: str):
         if not state.db.delete_term(term_id):
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "术语不存在"})
+            raise HTTPException(
+                status_code=404, detail={"code": "not_found", "message": "术语不存在"}
+            )
         return {"deleted": True}
 
     @app.post("/v1/glossary/extract")
@@ -828,7 +898,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.post("/v1/search")
     async def search(req: SearchRequest):
         state.doc_or_404(req.document_id)
-        hits = state.db.search(req.document_id, req.query, limit=max(1, min(req.limit, 30)))
+        hits = state.db.search(
+            req.document_id, req.query, limit=max(1, min(req.limit, 30))
+        )
         return {"hits": hits}
 
     return app

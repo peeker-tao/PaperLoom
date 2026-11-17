@@ -17,7 +17,9 @@ def test_extracts_paragraphs_and_merges_lines(tmp_path):
     joined = " ".join(texts)
     assert "LoomAttention" in joined
     # Lines of the same paragraph are merged into one segment.
-    abstract = next(seg for seg in doc["segments"] if seg["text"].startswith("Abstract."))
+    abstract = next(
+        seg for seg in doc["segments"] if seg["text"].startswith("Abstract.")
+    )
     assert "efficient retrieval augmented generation" in abstract["text"]
     assert abstract["bbox"][2] > abstract["bbox"][0]
     assert doc["coverage"] > 0.8

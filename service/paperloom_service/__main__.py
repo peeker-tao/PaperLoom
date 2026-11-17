@@ -19,13 +19,23 @@ def main(argv: list[str] | None = None) -> int:
     from . import __version__
     from .config import api_key_status, load_runtime
 
-    parser = argparse.ArgumentParser(prog="paperloom-service", description="PaperLoom local service")
-    parser.add_argument("--port", type=int, default=None, help="loopback port (default 23124)")
-    parser.add_argument("--host", default="127.0.0.1", help="bind address (loopback only)")
+    parser = argparse.ArgumentParser(
+        prog="paperloom-service", description="PaperLoom local service"
+    )
+    parser.add_argument(
+        "--port", type=int, default=None, help="loopback port (default 23124)"
+    )
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="bind address (loopback only)"
+    )
     parser.add_argument("--data-dir", default=None, help="data directory")
-    parser.add_argument("--print-token", action="store_true", help="print instance token and exit")
+    parser.add_argument(
+        "--print-token", action="store_true", help="print instance token and exit"
+    )
     parser.add_argument("--version", action="store_true", help="print version and exit")
-    parser.add_argument("--check", action="store_true", help="validate configuration and exit")
+    parser.add_argument(
+        "--check", action="store_true", help="validate configuration and exit"
+    )
     args = parser.parse_args(argv)
 
     if args.data_dir:

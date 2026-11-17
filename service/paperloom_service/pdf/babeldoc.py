@@ -60,7 +60,7 @@ def _write_config(
 
     lines = [
         "[babeldoc]",
-        f"openai = true",
+        "openai = true",
         f"openai-model = {q(model)}",
         f"openai-base-url = {q(base_url.rstrip('/') + '/v1')}",
         f"openai-api-key = {q(api_key)}",

@@ -7,11 +7,41 @@ from paperloom_service.context import build_context, validate_citations
 
 def segments():
     return [
-        {"id": "p1-s0", "page": 1, "text": "Title of the paper", "kind": "title", "bbox": [0, 0, 1, 1]},
-        {"id": "p1-s1", "page": 1, "text": "We propose LoomAttention, a sparse attention method.", "kind": "body", "bbox": [0, 0, 1, 1]},
-        {"id": "p1-s2", "page": 1, "text": "It reduces memory by 42 percent on three benchmarks.", "kind": "body", "bbox": [0, 0, 1, 1]},
-        {"id": "p2-s0", "page": 2, "text": "2. Method", "kind": "heading", "bbox": [0, 0, 1, 1]},
-        {"id": "p2-s1", "page": 2, "text": "The routing network selects key blocks.", "kind": "body", "bbox": [0, 0, 1, 1]},
+        {
+            "id": "p1-s0",
+            "page": 1,
+            "text": "Title of the paper",
+            "kind": "title",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p1-s1",
+            "page": 1,
+            "text": "We propose LoomAttention, a sparse attention method.",
+            "kind": "body",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p1-s2",
+            "page": 1,
+            "text": "It reduces memory by 42 percent on three benchmarks.",
+            "kind": "body",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p2-s0",
+            "page": 2,
+            "text": "2. Method",
+            "kind": "heading",
+            "bbox": [0, 0, 1, 1],
+        },
+        {
+            "id": "p2-s1",
+            "page": 2,
+            "text": "The routing network selects key blocks.",
+            "kind": "body",
+            "bbox": [0, 0, 1, 1],
+        },
     ]
 
 

@@ -10,6 +10,7 @@ __pycache__/
 
 # --- build outputs ---
 plugin/dist/
+plugin/content/
 dist/
 build/
 *.xpi

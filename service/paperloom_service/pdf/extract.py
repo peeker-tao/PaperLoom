@@ -10,9 +10,9 @@ import hashlib
 import logging
 import re
 import statistics
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LAParams, LTChar, LTTextContainer, LTTextLine
@@ -22,10 +22,10 @@ log = logging.getLogger("paperloom.pdf")
 MIN_CHARS_PER_PAGE = 60
 SENTENCE_END = tuple(".!?:。！？；;")
 MATH_CHARS = set("∑∫√±≤≥≈∈∂∇αβγθλμσφωΩΔπ×÷≠∞")
-CAPTION_RE = re.compile(r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.I)
+CAPTION_RE = re.compile(r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE)
 SECTION_RE = re.compile(r"^(\d+(\.\d+)*|[IVX]+\.)\s+\S")
-REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.I)
-PAGE_NUMBER_RE = re.compile(r"^\s*(page\s*)?\d{1,4}\s*$", re.I)
+REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
+PAGE_NUMBER_RE = re.compile(r"^\s*(page\s*)?\d{1,4}\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -171,15 +171,12 @@ def _can_merge(cur: list[TextLine], line: TextLine, median_width: float) -> bool
     gap = prev.y0 - line.y1
     if gap < -prev.height * 0.4 or gap > max(prev.size, line.size) * 0.9:
         return False
-    if abs(line.x0 - cur[0].x0) > max(28.0, median_width * 0.06):
-        # Allow first-line indentation of a paragraph continuation.
-        if abs(line.x0 - cur[0].x0) > max(60.0, median_width * 0.12):
-            return False
+    # Allow small first-line indentation of a paragraph continuation.
+    if abs(line.x0 - cur[0].x0) > max(60.0, median_width * 0.12):
+        return False
     if prev.size and line.size and not (0.72 <= line.size / prev.size <= 1.38):
         return False
-    if prev.width < median_width * 0.72 and prev.text.endswith(SENTENCE_END):
-        return False
-    return True
+    return not (prev.width < median_width * 0.72 and prev.text.endswith(SENTENCE_END))
 
 
 def _join(a: str, b: str) -> str:
@@ -207,7 +204,7 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
         return "reference"
     if len(text) < 200 and _math_ratio(text) >= 0.12:
         return "formula"
-    if page == 1 and re.match(r"^abstract\b", text, re.I):
+    if page == 1 and re.match(r"^abstract\b", text, re.IGNORECASE):
         return "abstract"
     return "body"
 
@@ -233,7 +230,7 @@ def _merge_page(lines: list[TextLine], page: int, body_size: float) -> list[dict
 
     segments: list[dict] = []
     for index, group in enumerate(groups):
-        first, last = group[0], group[-1]
+        first, _last = group[0], group[-1]
         text = first.text
         for line in group[1:]:
             text = _join(text, line.text)

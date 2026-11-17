@@ -42,7 +42,9 @@ async def test_status_and_settings(client):
 
 
 async def test_settings_store_masks_key(client):
-    response = await client.post("/v1/settings", json={"apiKey": "sk-test-abcdefghijklmnop"})
+    response = await client.post(
+        "/v1/settings", json={"apiKey": "sk-test-abcdefghijklmnop"}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["apiKey"]["configured"] is True
@@ -115,7 +117,9 @@ async def test_job_cancel_is_idempotent(client, pdf_path):
 
 async def test_job_retry_creates_new_job(client, pdf_path):
     data = await register(client, pdf_path)
-    job_id = (await client.post("/v1/jobs", json={"documentId": data["document"]["id"]})).json()["job"]["id"]
+    job_id = (
+        await client.post("/v1/jobs", json={"documentId": data["document"]["id"]})
+    ).json()["job"]["id"]
     await wait_job(client, job_id)
     response = await client.post(f"/v1/jobs/{job_id}/retry")
     assert response.status_code == 200
@@ -128,7 +132,9 @@ async def test_scanned_pdf_job_fails_clearly(client, tmp_path):
     path = scanned_pdf(tmp_path / "scan.pdf")
     data = await register(client, path)
     assert data["document"]["scanned"] is True
-    response = await client.post("/v1/jobs", json={"documentId": data["document"]["id"]})
+    response = await client.post(
+        "/v1/jobs", json={"documentId": data["document"]["id"]}
+    )
     job_id = response.json()["job"]["id"]
     job = await wait_job(client, job_id)
     assert job["state"] == "failed"
@@ -154,14 +160,20 @@ async def test_chat_streams_and_persists(client, pdf_path):
     assert names[-1] == "done"
     done = events[-1][1]
     assert "模拟" in done["text"]
-    citations = next(payload["citations"] for name, payload in events if name == "citations")
+    citations = next(
+        payload["citations"] for name, payload in events if name == "citations"
+    )
     assert citations
     assert citations[0]["segmentId"]
 
-    conversations = (await client.get("/v1/conversations", params={"documentId": doc_id})).json()
+    conversations = (
+        await client.get("/v1/conversations", params={"documentId": doc_id})
+    ).json()
     assert conversations["conversations"]
     conv_id = conversations["conversations"][0]["id"]
-    messages = (await client.get(f"/v1/conversations/{conv_id}/messages")).json()["messages"]
+    messages = (await client.get(f"/v1/conversations/{conv_id}/messages")).json()[
+        "messages"
+    ]
     assert [m["role"] for m in messages] == ["user", "assistant"]
     assert messages[1]["status"] == "done"
 
@@ -184,7 +196,11 @@ async def test_analysis_stream(client, pdf_path):
     data = await register(client, pdf_path)
     response = await client.post(
         "/v1/analysis",
-        json={"kind": "limitations", "documentIds": [data["document"]["id"]], "focus": "实验缺失"},
+        json={
+            "kind": "limitations",
+            "documentIds": [data["document"]["id"]],
+            "focus": "实验缺失",
+        },
     )
     assert response.status_code == 200
     events = parse_sse(response.text)
@@ -198,16 +214,24 @@ async def test_glossary_crud(client, pdf_path):
     doc_id = data["document"]["id"]
     response = await client.post(
         "/v1/glossary",
-        json={"documentId": doc_id, "source": "sparse attention", "target": "稀疏注意力"},
+        json={
+            "documentId": doc_id,
+            "source": "sparse attention",
+            "target": "稀疏注意力",
+        },
     )
     assert response.status_code == 200
     term = response.json()["term"]
     assert term["status"] == "confirmed"
 
-    response = await client.patch(f"/v1/glossary/{term['id']}", json={"target": "稀疏注意机制"})
+    response = await client.patch(
+        f"/v1/glossary/{term['id']}", json={"target": "稀疏注意机制"}
+    )
     assert response.json()["term"]["target"] == "稀疏注意机制"
 
-    listed = (await client.get("/v1/glossary", params={"documentId": doc_id})).json()["terms"]
+    listed = (await client.get("/v1/glossary", params={"documentId": doc_id})).json()[
+        "terms"
+    ]
     assert any(t["id"] == term["id"] for t in listed)
 
     assert (await client.delete(f"/v1/glossary/{term['id']}")).json()["deleted"] is True
@@ -217,7 +241,8 @@ async def test_glossary_crud(client, pdf_path):
 async def test_glossary_extract_fake(client, pdf_path):
     data = await register(client, pdf_path)
     response = await client.post(
-        "/v1/glossary/extract", json={"documentId": data["document"]["id"], "maxTerms": 4}
+        "/v1/glossary/extract",
+        json={"documentId": data["document"]["id"], "maxTerms": 4},
     )
     assert response.status_code == 200
     body = response.json()
@@ -242,7 +267,8 @@ async def test_reading_state_roundtrip(client, pdf_path):
 async def test_search_finds_segment(client, pdf_path):
     data = await register(client, pdf_path)
     response = await client.post(
-        "/v1/search", json={"documentId": data["document"]["id"], "query": "LoomAttention"}
+        "/v1/search",
+        json={"documentId": data["document"]["id"], "query": "LoomAttention"},
     )
     assert response.status_code == 200
     hits = response.json()["hits"]
@@ -273,12 +299,19 @@ async def test_register_rejects_bad_path(client, tmp_path):
     txt.write_text("not a pdf")
     response = await client.post(
         "/v1/documents/register",
-        json={"libraryId": "1", "itemKey": "A", "attachmentKey": "B", "pdfPath": str(txt)},
+        json={
+            "libraryId": "1",
+            "itemKey": "A",
+            "attachmentKey": "B",
+            "pdfPath": str(txt),
+        },
     )
     assert response.status_code == 400
 
 
-@pytest.mark.parametrize("kind", ["card", "experiment", "novelty", "compare", "outline"])
+@pytest.mark.parametrize(
+    "kind", ["card", "experiment", "novelty", "compare", "outline"]
+)
 async def test_all_analysis_kinds(client, pdf_path, kind):
     data = await register(client, pdf_path)
     payload = {"kind": kind, "documentIds": [data["document"]["id"]]}

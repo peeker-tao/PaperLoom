@@ -14,7 +14,8 @@ import os
 import random
 import re
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -22,7 +23,14 @@ log = logging.getLogger("paperloom.deepseek")
 
 
 class DeepSeekError(Exception):
-    def __init__(self, code: str, message: str, *, retryable: bool = False, status: int | None = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool = False,
+        status: int | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
@@ -51,7 +59,7 @@ class _RateLimiter:
 
 def _endpoint(base_url: str, path: str) -> str:
     base = (base_url or "https://api.deepseek.com").rstrip("/")
-    if base.endswith("/v1") or base.endswith("/beta"):
+    if base.endswith(("/v1", "/beta")):
         return base + path
     return base + path
 
@@ -68,20 +76,33 @@ def _classify(status: int, body: str) -> DeepSeekError:
     if status == 401:
         return DeepSeekError("auth", f"DeepSeek 鉴权失败：{message}", status=status)
     if status == 402:
-        return DeepSeekError("insufficient_balance", f"DeepSeek 余额不足：{message}", status=status)
+        return DeepSeekError(
+            "insufficient_balance", f"DeepSeek 余额不足：{message}", status=status
+        )
     if status == 429:
-        return DeepSeekError("rate_limit", f"DeepSeek 限流：{message}", retryable=True, status=status)
+        return DeepSeekError(
+            "rate_limit", f"DeepSeek 限流：{message}", retryable=True, status=status
+        )
     if "context" in lowered and ("length" in lowered or "token" in lowered):
         return DeepSeekError("context_length", f"上下文超限：{message}", status=status)
     if status >= 500:
-        return DeepSeekError("upstream", f"DeepSeek 服务端错误：{message}", retryable=True, status=status)
+        return DeepSeekError(
+            "upstream", f"DeepSeek 服务端错误：{message}", retryable=True, status=status
+        )
     if status == 400:
-        return DeepSeekError("bad_request", f"DeepSeek 请求错误：{message}", status=status)
+        return DeepSeekError(
+            "bad_request", f"DeepSeek 请求错误：{message}", status=status
+        )
     return DeepSeekError("http", f"DeepSeek HTTP {status}：{message}", status=status)
 
 
 def _fake_enabled() -> bool:
     return os.environ.get("PAPERLOOM_FAKE_LLM", "") not in ("", "0", "false", "False")
+
+
+def fake_mode() -> bool:
+    """True when responses come from the local fake implementation."""
+    return _fake_enabled()
 
 
 def estimate_tokens(text: str) -> int:
@@ -144,7 +165,9 @@ class DeepSeekClient:
         answer is never duplicated.
         """
         if _fake_enabled():
-            async for event in self._fake_stream(messages, model=model, json_mode=json_mode):
+            async for event in self._fake_stream(
+                messages, model=model, json_mode=json_mode
+            ):
                 yield event
             return
 
@@ -166,23 +189,26 @@ class DeepSeekClient:
             try:
                 async with self._semaphore:
                     await self._limiter.acquire()
-                    async with self._client() as client:
-                        async with client.stream(
-                            "POST",
-                            _endpoint(self.base_url, "/chat/completions"),
-                            headers=self._headers(),
-                            json=payload,
-                        ) as response:
-                            if response.status_code >= 400:
-                                body = (await response.aread()).decode("utf-8", "replace")
-                                raise _classify(response.status_code, body)
-                            async for event in self._iter_sse(response):
-                                if event["type"] == "delta":
-                                    emitted = True
-                                yield event
+                    async with self._client() as client, client.stream(
+                        "POST",
+                        _endpoint(self.base_url, "/chat/completions"),
+                        headers=self._headers(),
+                        json=payload,
+                    ) as response:
+                        if response.status_code >= 400:
+                            body = (await response.aread()).decode(
+                                "utf-8", "replace"
+                            )
+                            raise _classify(response.status_code, body)
+                        async for event in self._iter_sse(response):
+                            if event["type"] == "delta":
+                                emitted = True
+                            yield event
                 return
-            except (httpx.TimeoutException,) as exc:
-                err = DeepSeekError("timeout", f"DeepSeek 请求超时：{exc}", retryable=True)
+            except httpx.TimeoutException as exc:
+                err = DeepSeekError(
+                    "timeout", f"DeepSeek 请求超时：{exc}", retryable=True
+                )
             except httpx.HTTPError as exc:
                 err = DeepSeekError("network", f"网络错误：{exc}", retryable=True)
             except DeepSeekError as exc:
@@ -190,7 +216,9 @@ class DeepSeekClient:
             if emitted or not err.retryable or attempt + 1 >= self.max_retries:
                 raise err
             attempt += 1
-            log.warning("retrying DeepSeek request (attempt %s): %s", attempt, err.message)
+            log.warning(
+                "retrying DeepSeek request (attempt %s): %s", attempt, err.message
+            )
             await self._sleep_backoff(attempt)
 
     async def _iter_sse(self, response: httpx.Response) -> AsyncIterator[dict]:
@@ -254,7 +282,9 @@ class DeepSeekClient:
                 "text": text,
                 "finish_reason": "stop",
                 "usage": {
-                    "promptTokens": estimate_tokens(json.dumps(messages, ensure_ascii=False)),
+                    "promptTokens": estimate_tokens(
+                        json.dumps(messages, ensure_ascii=False)
+                    ),
                     "completionTokens": estimate_tokens(text),
                     "estimated": True,
                 },
@@ -303,8 +333,10 @@ class DeepSeekClient:
                     "finish_reason": choice.get("finish_reason"),
                     "usage": result_usage,
                 }
-            except (httpx.TimeoutException,) as exc:
-                err = DeepSeekError("timeout", f"DeepSeek 请求超时：{exc}", retryable=True)
+            except httpx.TimeoutException as exc:
+                err = DeepSeekError(
+                    "timeout", f"DeepSeek 请求超时：{exc}", retryable=True
+                )
             except httpx.HTTPError as exc:
                 err = DeepSeekError("network", f"网络错误：{exc}", retryable=True)
             except DeepSeekError as exc:
@@ -312,7 +344,9 @@ class DeepSeekClient:
             if not err.retryable or attempt + 1 >= self.max_retries:
                 raise err
             attempt += 1
-            log.warning("retrying DeepSeek request (attempt %s): %s", attempt, err.message)
+            log.warning(
+                "retrying DeepSeek request (attempt %s): %s", attempt, err.message
+            )
             await self._sleep_backoff(attempt)
 
     async def test_connection(self, model: str) -> dict:
@@ -344,7 +378,9 @@ class DeepSeekClient:
         yield {
             "type": "usage",
             "usage": {
-                "promptTokens": estimate_tokens(json.dumps(messages, ensure_ascii=False)),
+                "promptTokens": estimate_tokens(
+                    json.dumps(messages, ensure_ascii=False)
+                ),
                 "completionTokens": estimate_tokens(text),
                 "estimated": True,
             },
@@ -365,7 +401,8 @@ def _fake_text(messages: list[dict], *, json_mode: bool) -> str:
     if ids and ("translations" in user or json_mode):
         payload = {
             "translations": [
-                {"id": seg_id, "text": f"【模拟译文】{text[:120]}"} for seg_id, text in ids
+                {"id": seg_id, "text": f"【模拟译文】{text[:120]}"}
+                for seg_id, text in ids
             ]
         }
         return json.dumps(payload, ensure_ascii=False)
@@ -376,7 +413,10 @@ def _fake_text(messages: list[dict], *, json_mode: bool) -> str:
     marker = f" [[seg:{citations[0]}]]" if citations else ""
     if json_mode:
         return json.dumps(
-            {"answer": "模拟模式：未配置真实 API Key，此回答由本地假实现生成。" + marker},
+            {
+                "answer": "模拟模式：未配置真实 API Key，此回答由本地假实现生成。"
+                + marker
+            },
             ensure_ascii=False,
         )
     return "模拟模式：未配置真实 API Key，此回答由本地假实现生成。" + marker

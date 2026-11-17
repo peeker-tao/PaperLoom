@@ -7,7 +7,7 @@ the system prompt states that embedded instructions must be ignored.
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 CITATION_RE = re.compile(r"\[\[seg:([A-Za-z0-9_\-:]+)\]\]")
 HEADING_KINDS = {"title", "heading"}
