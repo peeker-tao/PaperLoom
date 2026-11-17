@@ -1,0 +1,294 @@
+import type { SSEEvent } from "../types";
+
+export class ServiceError extends Error {
+  status: number;
+  code: string;
+  retryable: boolean;
+
+  constructor(message: string, status = 0, code = "network", retryable = false) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+export interface Endpoint {
+  baseUrl: string;
+  token: string;
+}
+
+export class ServiceClient {
+  constructor(private readonly endpoint: () => Endpoint | null) {}
+
+  private require(): Endpoint {
+    const endpoint = this.endpoint();
+    if (!endpoint) {
+      throw new ServiceError("本地服务未启动", 0, "service_down", true);
+    }
+    return endpoint;
+  }
+
+  private headers(extra: Record<string, string> = {}): Record<string, string> {
+    const { token } = this.require();
+    return {
+      "Content-Type": "application/json",
+      "X-PaperLoom-Token": token,
+      ...extra,
+    };
+  }
+
+  async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const { baseUrl } = this.require();
+    const response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: this.headers((init.headers as Record<string, string>) || {}),
+    });
+    if (!response.ok) {
+      throw await this.toError(response);
+    }
+    return (await response.json()) as T;
+  }
+
+  private async toError(response: Response): Promise<ServiceError> {
+    let message = `HTTP ${response.status}`;
+    let code = "http";
+    let retryable = false;
+    try {
+      const body = await response.json();
+      const detail = body?.detail ?? body;
+      message = detail?.message || detail?.detail || message;
+      code = detail?.code || code;
+      retryable = Boolean(detail?.retryable);
+    } catch {
+      // Non-JSON error body.
+    }
+    return new ServiceError(message, response.status, code, retryable);
+  }
+
+  async *stream(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<SSEEvent> {
+    const { baseUrl } = this.require();
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: this.headers({ Accept: "text/event-stream" }),
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      throw await this.toError(response);
+    }
+    yield* this.consume(response);
+  }
+
+  async *getStream(path: string, signal?: AbortSignal): AsyncGenerator<SSEEvent> {
+    const { baseUrl } = this.require();
+    const response = await fetch(`${baseUrl}${path}`, {
+      headers: this.headers({ Accept: "text/event-stream" }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      throw await this.toError(response);
+    }
+    yield* this.consume(response);
+  }
+
+  private async *consume(response: Response): AsyncGenerator<SSEEvent> {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        let index = buffer.indexOf("\n\n");
+        while (index >= 0) {
+          const raw = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          const parsed = parseEvent(raw);
+          if (parsed) {
+            yield parsed;
+          }
+          index = buffer.indexOf("\n\n");
+        }
+      }
+      const tail = parseEvent(buffer);
+      if (tail) {
+        yield tail;
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Already released on abort.
+      }
+    }
+  }
+
+  // ---- endpoints ----------------------------------------------------- //
+  health(): Promise<{ ok: boolean; service: string; version: string; apiVersion: number }> {
+    return this.request("/health");
+  }
+
+  status() {
+    return this.request<import("../types").ServiceStatus>("/v1/status");
+  }
+
+  getSettings() {
+    return this.request<import("../types").SettingsPayload>("/v1/settings");
+  }
+
+  saveSettings(patch: Record<string, unknown>) {
+    return this.request<{ settings: any; apiKey: import("../types").ApiKeyStatus }>("/v1/settings", {
+      method: "POST",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  testSettings(model?: string) {
+    return this.request<{ ok: boolean; error?: any; latencyMs?: number; reply?: string }>(
+      "/v1/settings/test",
+      { method: "POST", body: JSON.stringify({ model }) },
+    );
+  }
+
+  registerDocument(payload: Record<string, unknown>) {
+    return this.request<{
+      document: import("../types").DocumentMeta;
+      segmentCount: number;
+      cached: boolean;
+      coverage?: number;
+    }>("/v1/documents/register", { method: "POST", body: JSON.stringify(payload) });
+  }
+
+  getDocument(documentId: string) {
+    return this.request<{ document: import("../types").DocumentMeta; segmentCount: number; translatedCount: number }>(
+      `/v1/documents/${documentId}`,
+    );
+  }
+
+  getSegments(documentId: string, page?: number) {
+    const query = page ? `?page=${page}` : "";
+    return this.request<{ segments: import("../types").Segment[]; count: number }>(
+      `/v1/documents/${documentId}/segments${query}`,
+    );
+  }
+
+  startTranslation(documentId: string, options: Record<string, unknown> = {}) {
+    return this.request<{ job: import("../types").Job }>("/v1/jobs", {
+      method: "POST",
+      body: JSON.stringify({ documentId, ...options }),
+    });
+  }
+
+  listJobs(documentId: string, limit = 5) {
+    return this.request<{ jobs: import("../types").Job[] }>(
+      `/v1/jobs?documentId=${encodeURIComponent(documentId)}&limit=${limit}`,
+    );
+  }
+
+  cancelJob(jobId: string) {
+    return this.request<{ job: import("../types").Job }>(`/v1/jobs/${jobId}/cancel`, { method: "POST" });
+  }
+
+  retryJob(jobId: string) {
+    return this.request<{ job: import("../types").Job }>(`/v1/jobs/${jobId}/retry`, { method: "POST" });
+  }
+
+  jobEventsUrl(jobId: string, after: number) {
+    return `/v1/jobs/${jobId}/events?after=${after}`;
+  }
+
+  chat(body: unknown, signal?: AbortSignal) {
+    return this.stream("/v1/chat", body, signal);
+  }
+
+  analysis(body: unknown, signal?: AbortSignal) {
+    return this.stream("/v1/analysis", body, signal);
+  }
+
+  getGlossary(documentId: string) {
+    return this.request<{ terms: import("../types").Term[] }>(
+      `/v1/glossary?documentId=${encodeURIComponent(documentId)}`,
+    );
+  }
+
+  addTerm(body: Record<string, unknown>) {
+    return this.request<{ term: import("../types").Term; affectedSegments: number }>("/v1/glossary", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  patchTerm(termId: string, body: Record<string, unknown>) {
+    return this.request<{ term: import("../types").Term }>(`/v1/glossary/${termId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteTerm(termId: string) {
+    return this.request<{ deleted: boolean }>(`/v1/glossary/${termId}`, { method: "DELETE" });
+  }
+
+  extractTerms(documentId: string) {
+    return this.request<{ terms: import("../types").Term[]; count: number }>("/v1/glossary/extract", {
+      method: "POST",
+      body: JSON.stringify({ documentId }),
+    });
+  }
+
+  getReading(documentId: string) {
+    return this.request<{ state: Partial<import("../types").ReadingState> }>(`/v1/reading/${documentId}`);
+  }
+
+  saveReading(documentId: string, body: Record<string, unknown>) {
+    return this.request<{ state: import("../types").ReadingState }>(`/v1/reading/${documentId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  listConversations(documentId: string) {
+    return this.request<{ conversations: { id: string; document_id: string; title: string; updated_at: number }[] }>(
+      `/v1/conversations?documentId=${encodeURIComponent(documentId)}`,
+    );
+  }
+
+  getMessages(conversationId: string) {
+    return this.request<{ messages: any[] }>(`/v1/conversations/${conversationId}/messages`);
+  }
+
+  search(documentId: string, query: string, limit = 8) {
+    return this.request<{ hits: { segment_id: string; page: number; snippet: string }[] }>("/v1/search", {
+      method: "POST",
+      body: JSON.stringify({ documentId, query, limit }),
+    });
+  }
+}
+
+function parseEvent(raw: string): SSEEvent | null {
+  const lines = raw.split("\n");
+  let event = "message";
+  const data: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice(5).trim());
+    }
+  }
+  if (!data.length) {
+    return null;
+  }
+  try {
+    return { event, data: JSON.parse(data.join("\n")) };
+  } catch {
+    return { event, data: { raw: data.join("\n") } };
+  }
+}

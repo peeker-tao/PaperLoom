@@ -1,0 +1,26 @@
+<vbox xmlns:html="http://www.w3.org/1999/xhtml" id="paperloom-preferences" onload="PaperLoomPrefs.init()">
+  <linkset>
+    <html:style>
+      .pl-pref-status { padding: 6px 0 10px; color: #555; }
+      .pl-pref-status--ok { color: #23615a; }
+      .pl-pref-status--error { color: #a33a2c; }
+      .pl-pref-field { margin-bottom: 10px; display: flex; flex-direction: column; gap: 3px; }
+      .pl-pref-label { color: #6d736f; font-size: 12px; }
+      .pl-pref-input { padding: 5px 7px; border: 1px solid #d8d5cb; border-radius: 5px; font: inherit; background: #fff; }
+      .pl-pref-models { display: flex; gap: 18px; flex-wrap: wrap; }
+      .pl-pref-actions { display: flex; gap: 8px; margin: 12px 0 8px; }
+      .pl-pref-button { padding: 5px 12px; border: 1px solid #d8d5cb; border-radius: 6px; background: #fff; cursor: pointer; font: inherit; }
+      .pl-pref-button--primary { background: #23615a; border-color: #23615a; color: #fff; }
+      .pl-pref-message { color: #45514c; min-height: 18px; margin-bottom: 6px; }
+      .pl-pref-diagnostics { color: #6d736f; font-size: 12px; max-width: 640px; line-height: 1.6; }
+    </html:style>
+  </linkset>
+  <groupbox>
+    <label><html:h2>PaperLoom · 文织</html:h2></label>
+    <description>DeepSeek 驱动的 Zotero 双语阅读与论文分析插件。密钥只保存在本机服务中。</description>
+  </groupbox>
+  <groupbox>
+    <label><html:h3>模型与连接</html:h3></label>
+    <html:div id="paperloom-prefs-root">正在加载…</html:div>
+  </groupbox>
+</vbox>

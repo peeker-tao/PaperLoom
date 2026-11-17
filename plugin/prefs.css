@@ -1,0 +1,10 @@
+#paperloom-prefs-root {
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px;
+  color: #22262b;
+}
+#paperloom-prefs-root .pl-pref-input:focus {
+  outline: none;
+  border-color: #9dbfb6;
+  box-shadow: 0 0 0 2px rgba(35, 97, 90, 0.12);
+}
