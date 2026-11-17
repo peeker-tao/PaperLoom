@@ -202,4 +202,31 @@ export const SHADOW_CSS = `
   .pl-sidebar { width: min(var(--pl-width, 380px), 100vw); }
 }
 .pl-bilingual__empty { padding: 40px; text-align: center; color: var(--pl-muted); }
+.pl-page-stage { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 20px; }
+.pl-page-stage.dual { flex-direction: row; align-items: flex-start; }
+.pl-page-col { min-width: 0; }
+.pl-page-stage.dual .pl-page-col { flex: 1; }
+.pl-page-frame {
+  position: relative; overflow: hidden; background: #fff;
+  border: 1px solid var(--pl-border); border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.pl-page-img { display: block; width: 100%; height: 100%; user-select: none; }
+.pl-seg-overlay {
+  position: absolute; display: block; margin: 0; padding: 0 1px; overflow: hidden;
+  border: 0; border-radius: 2px; text-align: left; cursor: pointer;
+  font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: #14181b; background: rgba(253, 252, 248, 0.93);
+  box-shadow: 0 0 0 1px rgba(45, 106, 79, 0.14);
+  user-select: text; word-break: break-word; white-space: normal;
+}
+.pl-seg-overlay:hover { background: #fff; box-shadow: 0 0 0 1px var(--pl-accent); z-index: 3; }
+.pl-seg-overlay.untranslated { background: transparent; box-shadow: none; cursor: default; }
+.pl-seg-overlay.highlight { background: var(--pl-accent-weak); box-shadow: 0 0 0 2px var(--pl-accent); z-index: 4; }
+.pl-seg-box { position: absolute; border-radius: 2px; pointer-events: none; }
+.pl-seg-box.highlight { background: rgba(45, 106, 79, 0.16); box-shadow: 0 0 0 2px var(--pl-accent); }
+.pl-page-detail {
+  border-top: 1px solid var(--pl-border); background: #fff;
+  padding: 8px 12px 10px; max-height: 38%; overflow-y: auto;
+}
 `;

@@ -147,6 +147,88 @@ export function readerDocument(reader: any): Document | null {
   }
 }
 
+/** Abort a page render that never resolves (bad PDF, stalled pdf.js worker). */
+const RENDER_TIMEOUT_MS = 8000;
+
+export interface RenderedPage {
+  page: number;
+  dataUrl: string;
+  /** CSS pixel size of the rendered bitmap. */
+  width: number;
+  height: number;
+  /** PDF user-space size of the unrotated page; used to place overlays. */
+  pageWidth: number;
+  pageHeight: number;
+  rotation: number;
+  scale: number;
+}
+
+/**
+ * Render one PDF page to a PNG data URL using the reader's own pdf.js instance.
+ *
+ * This is what keeps figures, formulas and tables visible in the bilingual
+ * view: we draw the real page instead of re-flowing text, then overlay the
+ * translated paragraphs at their original coordinates.
+ */
+export async function renderPdfPage(
+  reader: any,
+  pageNumber: number,
+  targetWidth: number,
+): Promise<RenderedPage | null> {
+  const app = reader?._iframeWindow?.PDFViewerApplication;
+  const pdfDocument = app?.pdfDocument;
+  if (!pdfDocument || typeof document === "undefined") {
+    return null;
+  }
+  const page = await pdfDocument.getPage(pageNumber);
+  if (typeof page?.render !== "function") {
+    return null;
+  }
+  const rotation = ((Number(page.rotate) || 0) % 360 + 360) % 360;
+  const base = page.getViewport({ scale: 1, rotation });
+  const requested = Math.max(180, Math.min(2400, Math.round(targetWidth) || 640));
+  const scale = Math.max(0.2, Math.min(3, requested / base.width));
+  const viewport = page.getViewport({ scale, rotation });
+
+  const ratio = Math.max(1, Math.min(2, Number(globalThis.devicePixelRatio) || 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(viewport.width * ratio));
+  canvas.height = Math.max(1, Math.round(viewport.height * ratio));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
+  }
+  const renderViewport =
+    ratio === 1 ? viewport : page.getViewport({ scale: scale * ratio, rotation });
+  const task = page.render({ canvasContext: context, viewport: renderViewport });
+  // Some environments never resolve the render promise (observed with pdf.js in
+  // an offscreen Chromium and on a few exotic PDFs). Bail out instead of
+  // leaving the view stuck on "rendering".
+  const finished = await Promise.race([
+    task.promise.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), RENDER_TIMEOUT_MS)),
+  ]);
+  if (!finished) {
+    try {
+      task.cancel();
+    } catch {
+      // ignore: the task may already be finished
+    }
+    debug("page render timed out", pageNumber);
+    return null;
+  }
+  return {
+    page: pageNumber,
+    dataUrl: canvas.toDataURL("image/png"),
+    width: viewport.width,
+    height: viewport.height,
+    pageWidth: base.width,
+    pageHeight: base.height,
+    rotation,
+    scale,
+  };
+}
+
 export function isPdfReader(reader: any): boolean {
   try {
     const item = Zotero.Items.get(reader.itemID);

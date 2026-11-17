@@ -18,7 +18,8 @@ import type {
   Term,
   TranslationStatus,
 } from "../types";
-import { attachmentContext, attachmentContextFromItem, bestPdfAttachment, createPrefs, currentPage, findPaperLoomNotes, jumpToPage, readerDocument } from "../zotero/api";
+import { attachmentContext, attachmentContextFromItem, bestPdfAttachment, createPrefs, currentPage, findPaperLoomNotes, jumpToPage, readerDocument, renderPdfPage } from "../zotero/api";
+import type { RenderedPage } from "../zotero/api";
 
 export interface PluginHost {
   id: string;
@@ -75,6 +76,8 @@ export interface UIState {
   model: string;
   models: { id: string; label: string }[];
   translationStatus: TranslationStatus | null;
+  /** Segment briefly highlighted after a citation/segment jump. */
+  highlight: string | null;
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -109,6 +112,7 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     model: "",
     models: [],
     translationStatus: null,
+    highlight: null,
   };
 }
 
@@ -127,6 +131,10 @@ export class ReaderController {
   private saveAckSeq = 0;
   /** Serializes writes so the newest state always lands last. */
   private saveChain: Promise<void> = Promise.resolve();
+  /** Rendered page bitmaps keyed by page + width bucket (bounded cache). */
+  private pageImages = new Map<string, RenderedPage>();
+  private pageImageLoading = new Map<string, Promise<RenderedPage | null>>();
+  private highlightTimer: ReturnType<typeof setTimeout> | null = null;
   private pageHandler: ((event: any) => void) | null = null;
   private destroyed = false;
   private noteIndex: { get(): Record<string, string>; set(value: Record<string, string>): void };
@@ -423,9 +431,82 @@ export class ReaderController {
 
   jumpToSegment(segmentId: string): void {
     const segment = this.state.segments.find((item) => item.id === segmentId);
-    if (segment) {
-      this.jumpTo(segment.page);
+    if (!segment) {
+      return;
     }
+    // Show the translated column so the jump has something to highlight.
+    if (this.state.mode === "original") {
+      this.setMode("dual");
+    }
+    if (segment.page !== this.state.page) {
+      this.jumpTo(segment.page);
+    } else {
+      jumpToPage(this.reader, segment.page);
+    }
+    this.flashSegment(segment.id);
+  }
+
+  /** Briefly highlight a segment in the bilingual view. */
+  private flashSegment(segmentId: string): void {
+    this.set({ highlight: segmentId });
+    if (this.highlightTimer) {
+      clearTimeout(this.highlightTimer);
+    }
+    this.highlightTimer = setTimeout(() => {
+      this.highlightTimer = null;
+      if (!this.destroyed) {
+        this.set({ highlight: null });
+      }
+    }, 2400);
+  }
+
+  /**
+   * Rendered page bitmap for the bilingual view. Results are cached per page and
+   * width bucket so resizing does not re-render on every pixel change.
+   */
+  async loadPageImage(page: number, width: number): Promise<RenderedPage | null> {
+    if (!this.state.document) {
+      return null;
+    }
+    const bucket = Math.max(200, Math.round((width || 640) / 60) * 60);
+    const key = `${page}:${bucket}`;
+    const cached = this.pageImages.get(key);
+    if (cached) {
+      return cached;
+    }
+    const inFlight = this.pageImageLoading.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+    const task = (async () => {
+      try {
+        const rendered = await renderPdfPage(this.reader, page, bucket);
+        if (rendered) {
+          this.pageImages.set(key, rendered);
+          // Keep memory bounded: bitmaps are large.
+          while (this.pageImages.size > 10) {
+            const oldest = this.pageImages.keys().next().value as string | undefined;
+            if (!oldest) {
+              break;
+            }
+            this.pageImages.delete(oldest);
+          }
+        }
+        return rendered;
+      } catch (error) {
+        debug("page render failed", errorText(error));
+        return null;
+      } finally {
+        this.pageImageLoading.delete(key);
+      }
+    })();
+    this.pageImageLoading.set(key, task);
+    return task;
+  }
+
+  clearPageImages(): void {
+    this.pageImages.clear();
+    this.pageImageLoading.clear();
   }
 
   private applyBodyStyles(): void {
@@ -1271,6 +1352,11 @@ export class ReaderController {
     this.destroyed = true;
     // Persist whatever is still debounced before the controller goes away.
     this.flushReadingState();
+    if (this.highlightTimer) {
+      clearTimeout(this.highlightTimer);
+      this.highlightTimer = null;
+    }
+    this.clearPageImages();
     this.chatAbort?.abort();
     this.analysisAbort?.abort();
     this.jobAbort?.abort();
