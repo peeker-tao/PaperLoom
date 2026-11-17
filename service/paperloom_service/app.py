@@ -225,7 +225,11 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "llm": "fake" if fake_mode() else "live",
             "apiKey": api_key_status(cfg),
             "capabilities": {
-                "babeldoc": engine_info(),
+                "babeldoc": {
+                    **engine_info(),
+                    "enabled": state.settings.babeldoc_enabled,
+                    "timeoutSeconds": state.settings.babeldoc_timeout,
+                },
                 "fts5": True,
                 "vision": True,
                 "alignment": "segment",

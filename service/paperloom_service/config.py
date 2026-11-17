@@ -65,6 +65,7 @@ class Settings:
     max_output_tokens: int = 8192
     thinking: bool = False
     babeldoc_enabled: bool = True
+    babeldoc_timeout: float = 3600.0
 
     def public(self) -> dict:
         data = asdict(self)

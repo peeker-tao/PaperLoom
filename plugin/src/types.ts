@@ -71,6 +71,17 @@ export interface JobProgress {
   message?: string;
 }
 
+export interface LayoutStatus {
+  state: "succeeded" | "failed" | "missing" | "skipped" | "cancelled";
+  engine?: string;
+  code?: string;
+  message?: string;
+  reason?: string;
+  retryable?: boolean;
+  pages?: Record<string, number>;
+  artifacts?: string[];
+}
+
 export interface Job {
   id: string;
   state: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -79,6 +90,7 @@ export interface Job {
   error?: { code: string; message: string; retryable: boolean } | null;
   usage?: Usage | null;
   artifacts?: { kind: string; path: string; bytes?: number }[];
+  layout?: LayoutStatus | null;
   documentId?: string;
   options?: { pages?: number[] | null; model?: string | null; force?: boolean };
 }
@@ -106,7 +118,15 @@ export interface ServiceStatus {
   llm?: "live" | "fake";
   apiKey: ApiKeyStatus;
   capabilities: {
-    babeldoc: { available: boolean; path: string; license: string };
+    babeldoc: {
+      available: boolean;
+      path: string;
+      version?: string;
+      license: string;
+      note?: string;
+      enabled?: boolean;
+      timeoutSeconds?: number;
+    };
     fts5: boolean;
     vision: boolean;
     alignment: string;
@@ -129,6 +149,7 @@ export interface SettingsPayload {
     max_output_tokens: number;
     thinking: boolean;
     babeldoc_enabled: boolean;
+    babeldoc_timeout?: number;
     baseUrlDefault: string;
   };
   apiKey: ApiKeyStatus;

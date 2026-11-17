@@ -127,6 +127,38 @@ async def test_translate_job_with_fake_llm(client, pdf_path):
     assert parsed[-1][1]["state"] == "succeeded"
 
 
+async def test_missing_engine_keeps_text_translation(client, pdf_path, monkeypatch):
+    """A missing BabelDOC engine must not fail the text job."""
+    from paperloom_service.pdf import babeldoc
+
+    monkeypatch.setattr(babeldoc, "find_engine", lambda: None)
+    data = await register(client, pdf_path)
+    response = await client.post(
+        "/v1/jobs",
+        json={"documentId": data["document"]["id"], "useBabeldoc": True},
+    )
+    job_id = response.json()["job"]["id"]
+    job = await wait_job(client, job_id)
+    assert job["state"] == "succeeded", job
+    assert "segments" in {a["kind"] for a in job["artifacts"]}
+    assert job["layout"]["state"] == "missing"
+    assert job["layout"]["code"] == "engine_missing"
+
+    segments = (await client.get(f"/v1/documents/{data['document']['id']}/segments")).json()
+    assert any(s.get("translation") for s in segments["segments"])
+
+
+async def test_babeldoc_disabled_skips_layout(client, pdf_path):
+    data = await register(client, pdf_path)
+    response = await client.post(
+        "/v1/jobs",
+        json={"documentId": data["document"]["id"], "useBabeldoc": False},
+    )
+    job = await wait_job(client, response.json()["job"]["id"])
+    assert job["state"] == "succeeded"
+    assert job["layout"]["state"] == "skipped"
+
+
 async def test_job_cancel_is_idempotent(client, pdf_path):
     data = await register(client, pdf_path)
     doc_id = data["document"]["id"]

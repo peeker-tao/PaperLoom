@@ -214,6 +214,7 @@ class JobManager:
                 stale_only=bool(options.get("staleOnly")),
                 use_babeldoc=options.get("useBabeldoc"),
                 cancel_token=token,
+                job_id=job_id,
                 on_progress=on_progress,
                 on_segment=on_segment,
                 on_log=on_log,
@@ -230,6 +231,7 @@ class JobManager:
                 progress=progress,
                 usage=result["usage"],
                 artifacts=result["artifacts"],
+                layout=result.get("layout"),
             )
             for warning in result.get("warnings", []):
                 self._emit(job_id, "log", {"message": warning, "level": "warning"})

@@ -142,6 +142,9 @@ MIGRATIONS: list[str] = [
     # Which configuration produced a translation. NULL means the row predates
     # this column ("unknown" provenance); user data is preserved.
     """ALTER TABLE segments ADD COLUMN translation_config TEXT;""",
+    # Layout (BabelDOC) status is tracked separately from text translation so a
+    # failed/absent engine never hides the usable text result.
+    """ALTER TABLE jobs ADD COLUMN layout TEXT;""",
 ]
 
 
@@ -402,13 +405,14 @@ class Database:
             "error",
             "usage",
             "artifacts",
+            "layout",
             "document_id",
         }
         sets, params = [], []
         for key, value in fields.items():
             if key not in allowed:
                 continue
-            if key in {"progress", "error", "usage", "artifacts"}:
+            if key in {"progress", "error", "usage", "artifacts", "layout"}:
                 value = json.dumps(value) if value is not None else None
             sets.append(f"{key}=?")
             params.append(value)
@@ -682,7 +686,7 @@ class Database:
 
 def _job_row(row: sqlite3.Row) -> dict:
     job = dict(row)
-    for key in ("progress", "error", "usage", "artifacts", "options"):
+    for key in ("progress", "error", "usage", "artifacts", "options", "layout"):
         job[key] = (
             json.loads(job[key])
             if job.get(key)

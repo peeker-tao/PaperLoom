@@ -12,7 +12,7 @@ from .config import RuntimeConfig, Settings, estimate_cost, load_pricing
 from .db import Database
 from .deepseek import DeepSeekClient, DeepSeekError
 from .glossary import glossary_block, glossary_signature
-from .pdf.babeldoc import EngineMissing
+from .pdf.babeldoc import BabeldocError
 from .pdf.babeldoc import translate_pdf as babeldoc_translate
 from .pdf.extract import parse_pdf
 from .translation_config import TranslationConfig, evaluate
@@ -197,6 +197,7 @@ async def translate_document(
     stale_only: bool = False,
     use_babeldoc: bool | None = None,
     cancel_token: asyncio.Event | None = None,
+    job_id: str = "",
     on_progress=None,
     on_segment=None,
     on_log=None,
@@ -325,6 +326,7 @@ async def translate_document(
             "alignment": doc.get("alignment", "segment"),
             "config": config_dict,
             "staleOnly": True,
+            "layout": {"state": "skipped", "reason": "没有需要重译的段落"},
         }
 
     total = len(selected)
@@ -396,21 +398,30 @@ async def translate_document(
     ]
     warnings: list[str] = []
 
+    # Layout status is tracked separately from the text result: a missing engine
+    # or a failed run must not make the (already saved) translations look failed.
+    layout: dict = {"state": "skipped", "engine": "babeldoc"}
     want_babeldoc = settings.babeldoc_enabled if use_babeldoc is None else use_babeldoc
     if want_babeldoc and doc.get("pdf_path"):
         if on_log:
             await on_log("尝试生成排版保留 PDF（BabelDOC）")
+        page_spec = ",".join(str(p) for p in sorted(set(pages))) if pages else None
+        # Each job writes into its own directory so concurrent runs cannot mix
+        # artifacts, and stale output can never be reported as fresh.
+        out_dir = doc_dir / "babeldoc" / (job_id or "latest")
         try:
-            page_spec = ",".join(str(p) for p in sorted(set(pages))) if pages else None
             result = await babeldoc_translate(
                 pdf_path=Path(doc["pdf_path"]),
-                output_dir=doc_dir / "babeldoc",
+                output_dir=out_dir,
                 api_key=client.api_key,
                 base_url=settings.base_url,
                 model=model,
                 pages=page_spec,
                 qps=settings.qps,
-                on_progress=(on_log or (lambda line: asyncio.sleep(0))),
+                timeout=settings.babeldoc_timeout,
+                cancel_token=cancel_token,
+                on_progress=on_log,
+                expected_pages=doc.get("pages") or None,
             )
             for kind in ("mono", "dual"):
                 path = result.get(kind)
@@ -418,14 +429,29 @@ async def translate_document(
                     artifacts.append(
                         {"kind": kind, "path": path, "bytes": Path(path).stat().st_size}
                     )
+            layout = {
+                "state": "succeeded",
+                "engine": "babeldoc",
+                "pages": result.get("pages", {}),
+                "artifacts": [k for k in ("mono", "dual") if result.get(k)],
+            }
             if on_log:
                 await on_log("排版保留 PDF 生成完成")
-        except EngineMissing as exc:
-            warnings.append(str(exc))
+        except BabeldocError as exc:
+            # Missing engine is expected on most installs: warn, never fail.
+            warnings.append(exc.message)
+            layout = {
+                "state": "missing" if exc.code == "engine_missing" else "failed",
+                **exc.as_dict(),
+            }
             if on_log:
-                await on_log(str(exc))
+                await on_log(exc.message)
+        except asyncio.CancelledError:
+            layout = {"state": "cancelled", "engine": "babeldoc"}
+            raise
         except Exception as exc:  # noqa: BLE001 - layout output is best-effort
             warnings.append(f"BabelDOC 失败：{exc}")
+            layout = {"state": "failed", "message": str(exc), "engine": "babeldoc"}
             if on_log:
                 await on_log(f"BabelDOC 失败：{exc}")
 
@@ -444,4 +470,5 @@ async def translate_document(
         "alignment": db.get_document(document_id).get("alignment", "segment"),
         "config": config_dict,
         "staleOnly": stale_only,
+        "layout": layout,
     }

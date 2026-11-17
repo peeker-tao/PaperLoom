@@ -147,6 +147,18 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           <span>
             {state.segments.length ? `${translated}/${state.segments.length}` : "未解析"}
           </span>
+          {state.job?.layout && state.job.layout.state === "failed" ? (
+            <span
+              className="pl-small pl-muted"
+              title={state.job.layout.message || "排版 PDF 生成失败，段落译文仍可使用"}
+            >
+              排版PDF失败
+            </span>
+          ) : state.job?.layout?.state === "missing" ? (
+            <span className="pl-small pl-muted" title={state.job.layout.message || "未安装 BabelDOC"}>
+              无排版引擎
+            </span>
+          ) : null}
           {state.translating ? (
             <button type="button" className="pl-btn pl-btn--ghost" onClick={() => void controller.cancelTranslation()}>
               取消翻译

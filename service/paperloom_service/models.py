@@ -117,6 +117,9 @@ class SettingsPatch(BaseModel):
     max_output_tokens: int | None = Field(default=None, alias="maxOutputTokens")
     thinking: bool | None = None
     babeldoc_enabled: bool | None = Field(default=None, alias="babeldocEnabled")
+    babeldoc_timeout: float | None = Field(
+        default=None, ge=30, le=14400, alias="babeldocTimeout"
+    )
     api_key: str | None = Field(default=None, alias="apiKey")
 
     model_config = {"populate_by_name": True}
