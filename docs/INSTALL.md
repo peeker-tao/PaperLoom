@@ -29,19 +29,35 @@ python -m venv .venv
 
 ### 方式 B：解压服务包
 
-从 Release 下载 `paperloom-service-<version>.zip`，解压后在本目录执行：
+从 Release 下载 `paperloom-service-<version>.zip`，解压后在本目录运行：
 
 ```powershell
-python -m pip install -e .
+scripts\install_service.ps1                 # 自动建 .venv 并安装
+# 或手动：
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e .
 ```
+
+> 服务包**不包含 Python 运行时**，只包含服务源码、`pyproject.toml` 与安装脚本。
+> 请先自行安装 Python 3.10+（勾选 “Add python.exe to PATH”）。
 
 ### 让 Zotero 找到 Python
 
-插件默认从 PATH 与常见安装目录寻找 `python.exe`。若未找到，在 Zotero 的
-`about:config`（设置 → 高级）中添加：
+插件会依次尝试：设置里的路径 → PATH 中的 `python.exe`（自动跳过 Microsoft Store 的
+`WindowsApps` 别名）→ 常见安装目录（`%LOCALAPPDATA%\Programs\Python\*`、conda 等）。
+每个候选解释器都会被**实际运行**并校验版本（需 3.10+），不是只看文件是否存在。
+
+若自动探测失败，在 Zotero 的 `about:config`（设置 → 高级）中添加：
 
 ```
 extensions.paperloom.pythonPath = D:\path\to\python.exe
+```
+
+启动失败时侧边栏会直接显示原因（例如 `No module named paperloom_service`），
+也可在服务目录手动自检：
+
+```powershell
+python -m paperloom_service --check
 ```
 
 > 服务只监听 `127.0.0.1`，端口从 23124 起自动探测；每次安装生成

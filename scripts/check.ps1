@@ -19,12 +19,18 @@ try {
   try {
     node node_modules/typescript/bin/tsc --noEmit
     if ($LASTEXITCODE -ne 0) { throw "typecheck failed" }
+    node test/overlay.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw "plugin unit tests failed" }
     node esbuild.config.mjs
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
   }
   finally {
     Pop-Location
   }
+
+  Write-Host "==> service lint" -ForegroundColor Cyan
+  & $python -m ruff check service scripts
+  if ($LASTEXITCODE -ne 0) { throw "lint failed" }
 
   Write-Host "==> service tests" -ForegroundColor Cyan
   & $python -m pytest service/tests -q

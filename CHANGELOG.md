@@ -6,6 +6,48 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-17
+
+### Added
+
+- Image-preserving bilingual view: the real PDF page is rendered with the
+  reader's pdf.js instance and translated paragraphs are placed on their
+  original bounding boxes, so figures, formulas, tables and layout survive.
+  Dual mode shows original and translated pages side by side (stacked in narrow
+  sidebars); clicking a paragraph jumps to and highlights it in the PDF.
+- Translation status is tracked per generation (model / base URL / prompt
+  version / glossary / output limit / document hash); stale translations are
+  reported and can be re-translated by an explicit action.
+- Layout status is tracked separately from text translation
+  (`succeeded` / `failed` / `missing` / `skipped`) and shown in the sidebar.
+- `GET /v1/documents/{id}/translation-status` and `babeldoc_timeout` setting.
+- `scripts/verify_live.py`, `scripts/check_overlay.py` and
+  `scripts/preview_overlay.py` for live-API and overlay verification.
+- Plugin unit tests for the overlay geometry, wired into CI.
+
+### Changed
+
+- Base URL handling is centralized: the chat endpoint, the OpenAI-compatible
+  `/v1` base used by BabelDOC and the status message now agree, and pasted
+  endpoint URLs are normalized instead of producing `/v1/v1`.
+- Reading state writes accumulate instead of overwriting, are serialized to
+  prevent stale writes, survive sidebar teardown, and are validated on restore.
+- Python discovery runs each candidate interpreter, requires 3.10+ and skips the
+  Microsoft Store alias; a failed start now reports the service's own `--check`
+  output instead of a bare timeout.
+
+### Fixed
+
+- BabelDOC subprocess: one deadline covering output draining, process-tree kill
+  on timeout/cancel/shutdown, per-job output directory, artifact validation,
+  key redaction in logs and deletion of the temporary config file.
+- Uppercase `[[SEG:…]]` citation markers bypassed validation and leaked into
+  answers.
+- Author/affiliation lines and single-character fragments were sent for
+  translation; they are now classified as `meta` / `noise`.
+- `selection` could never be cleared, and invalid page/sidebar values were
+  accepted by the reading-state endpoint.
+
 ## [0.1.1] - 2026-11-17
 
 ### Added

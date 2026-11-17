@@ -3,17 +3,34 @@
 ## The service does not start
 
 1. Open **Tools → PaperLoom Settings → Service → Show diagnostics**.
-2. Check the service log at `%APPDATA%\PaperLoom\logs\service.log`.
-3. Verify Python:
+2. The sidebar already shows the reason: the plugin runs the candidate
+   interpreter itself, requires Python 3.10+, and on failure calls
+   `python -m paperloom_service --check` to surface the real cause (for example
+   `No module named paperloom_service`).
+3. Check the service log at `%APPDATA%\PaperLoom\logs\service.log`.
+4. Verify Python:
    ```powershell
    python --version
    python -c "import fastapi, pydantic, pdfminer; print('ok')"
+   python -m paperloom_service --check
    ```
-4. Start the service manually to see the error:
+5. Start the service manually to see the error:
    ```powershell
    cd service
    python -m paperloom_service --port 23124
    ```
+
+### "No module named paperloom_service"
+
+The interpreter found on PATH is not the one with the dependencies. Either run
+`scripts\install_service.ps1` (creates `.venv` and installs the service) or set
+`extensions.paperloom.pythonPath` to `.venv\Scripts\python.exe`.
+
+### The Store alias opens the Microsoft Store
+
+`%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe` is a stub, not an
+interpreter. PaperLoom skips `WindowsApps` directories and validates every
+candidate by running it, so this alias is never launched.
 
 ### Port already in use
 
@@ -56,6 +73,24 @@ Paragraph merging failed for that page (common with two-column layouts or
 equation-heavy pages). The UI still lets you jump to the page, but the
 paragraph-level highlight is unavailable. Install BabelDOC for a
 layout-preserving PDF, or translate page ranges separately.
+
+## The layout (overlay) view falls back to plain text
+
+The overlay view renders the real page bitmap and anchors translations to their
+original boxes. It falls back to the text columns when:
+
+- the page is **rotated** — a plain scale + y-flip cannot reproduce pdf.js's
+  rotation matrix, so the overlay would land on the wrong text;
+- pdf.js does not finish rendering within 8 seconds (the task is cancelled
+  instead of leaving the view hanging);
+- `PDFViewerApplication.pdfDocument` is not ready yet — switch pages and back,
+  or reopen the reader.
+
+The underlying translations are unaffected: the text layout always works.
+
+The footer also shows the layout PDF status independently of the translation:
+`无排版引擎` means BabelDOC is not installed (optional, AGPL-3.0),
+`排版PDF失败` means it ran and failed (the message is in the tooltip).
 
 ## Zotero does not show the sidebar
 
