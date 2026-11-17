@@ -608,7 +608,21 @@ class Database:
             "sidebar_open": 1,
             "selection": None,
         }
-        current.update({k: v for k, v in fields.items() if v is not None})
+        # ``selection`` may legitimately be None (clear it); other fields only
+        # change when the client actually sent a value.
+        allowed = {"page", "mode", "sidebar_width", "sidebar_open", "selection"}
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if value is None and key != "selection":
+                continue
+            current[key] = value
+        if current.get("mode") not in {"original", "translated", "dual"}:
+            current["mode"] = "dual"
+        current["page"] = max(1, int(current.get("page") or 1))
+        current["sidebar_width"] = max(
+            300, min(620, int(current.get("sidebar_width") or 380))
+        )
         selection = current.get("selection")
         with self.connect() as conn:
             conn.execute(

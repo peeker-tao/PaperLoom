@@ -120,6 +120,13 @@ export class ReaderController {
   private analysisAbort: AbortController | null = null;
   private jobAbort: AbortController | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Accumulated, not-yet-sent reading patches for one attachment. */
+  private pendingSave: { documentId: string; patch: Record<string, unknown> } | null = null;
+  /** Monotonic counter so out-of-order responses can be recognised. */
+  private saveSeq = 0;
+  private saveAckSeq = 0;
+  /** Serializes writes so the newest state always lands last. */
+  private saveChain: Promise<void> = Promise.resolve();
   private pageHandler: ((event: any) => void) | null = null;
   private destroyed = false;
   private noteIndex: { get(): Record<string, string>; set(value: Record<string, string>): void };
@@ -227,16 +234,28 @@ export class ReaderController {
     try {
       const { state } = await this.host.service.client.getReading(this.state.document.id);
       if (state && Object.keys(state).length) {
+        // Restored values come from disk and may predate a re-registration, so
+        // validate them instead of trusting the stored payload.
+        const pageCount = Number(this.state.document.pages) || 0;
+        const storedPage = Number(state.page) || 1;
+        const page = pageCount > 0 ? Math.min(Math.max(1, storedPage), pageCount) : Math.max(1, storedPage);
+        const mode: ReadMode = ["original", "translated", "dual"].includes(state.mode as string)
+          ? (state.mode as ReadMode)
+          : "dual";
+        const width = Number(state.sidebar_width);
+        const sidebarWidth = Number.isFinite(width)
+          ? Math.max(300, Math.min(620, Math.round(width)))
+          : this.state.sidebarWidth;
         this.set({
-          page: state.page || 1,
-          mode: (state.mode as ReadMode) || "dual",
-          sidebarWidth: state.sidebar_width || this.state.sidebarWidth,
+          page,
+          mode,
+          sidebarWidth,
           sidebarOpen: state.sidebar_open !== 0,
           selection: (state as any).selection || null,
         });
         this.applyBodyStyles();
-        if (state.page && state.page > 1) {
-          jumpToPage(this.reader, state.page);
+        if (page > 1) {
+          jumpToPage(this.reader, page);
         }
       }
     } catch (error) {
@@ -419,18 +438,78 @@ export class ReaderController {
   }
 
   private scheduleSaveReading(patch: Record<string, unknown>): void {
-    if (!this.state.document) {
+    const documentId = this.state.document?.id;
+    if (!documentId) {
       return;
     }
+    // Never mix two attachments: flush the old patch before switching keys.
+    if (this.pendingSave && this.pendingSave.documentId !== documentId) {
+      this.flushReadingState();
+    }
+    // Debounced patches must accumulate; overwriting would drop earlier fields
+    // (e.g. the page is lost when the user resizes the sidebar right after).
+    this.pendingSave = {
+      documentId,
+      patch: { ...(this.pendingSave?.patch || {}), ...patch },
+    };
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
     }
-    const documentId = this.state.document.id;
-    this.saveTimer = setTimeout(() => {
-      this.host.service.client.saveReading(documentId, patch).catch((error) => {
+    this.saveTimer = setTimeout(() => this.flushReadingState(), 700);
+  }
+
+  /** Send the accumulated patch now; called on tab close too. */
+  flushReadingState(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    const pending = this.pendingSave;
+    this.pendingSave = null;
+    if (!pending) {
+      return;
+    }
+    this.enqueueReadingWrite(pending.documentId, pending.patch);
+  }
+
+  /**
+   * Writes are serialized so a slow request can never land after a newer one
+   * and roll the stored page/selection back.
+   */
+  private enqueueReadingWrite(documentId: string, patch: Record<string, unknown>): void {
+    this.saveSeq += 1;
+    const seq = this.saveSeq;
+    this.saveChain = this.saveChain.then(async () => {
+      try {
+        await this.host.service.client.saveReading(documentId, patch);
+        // Only advance the watermark: a superseded response (seq <= acked) means
+        // an even newer write already landed and must not be rolled back.
+        if (seq > this.saveAckSeq) {
+          this.saveAckSeq = seq;
+        }
+      } catch (error) {
         debug("save reading failed", errorText(error));
-      });
-    }, 700);
+        this.mergeFailedPatch(documentId, patch);
+      }
+    });
+  }
+
+  /** Re-queue a failed patch so the next debounce tick retries it. */
+  private mergeFailedPatch(documentId: string, patch: Record<string, unknown>): void {
+    if (this.destroyed) {
+      return;
+    }
+    if (this.pendingSave && this.pendingSave.documentId !== documentId) {
+      return;
+    }
+    this.pendingSave = {
+      documentId,
+      patch: { ...patch, ...(this.pendingSave?.patch || {}) },
+    };
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+    }
+    this.saveTimer = setTimeout(() => this.flushReadingState(), 2000);
   }
 
   // ---------------------------------------------------------------- chat
@@ -1190,6 +1269,8 @@ export class ReaderController {
       return;
     }
     this.destroyed = true;
+    // Persist whatever is still debounced before the controller goes away.
+    this.flushReadingState();
     this.chatAbort?.abort();
     this.analysisAbort?.abort();
     this.jobAbort?.abort();

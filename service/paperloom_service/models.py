@@ -126,9 +126,9 @@ class SettingsPatch(BaseModel):
 
 
 class ReadingStatePatch(BaseModel):
-    page: int | None = None
+    page: int | None = Field(default=None, ge=1)
     mode: Literal["original", "translated", "dual"] | None = None
-    sidebar_width: int | None = Field(default=None, alias="sidebarWidth")
+    sidebar_width: int | None = Field(default=None, ge=200, le=1000, alias="sidebarWidth")
     sidebar_open: bool | None = Field(default=None, alias="sidebarOpen")
     selection: dict[str, Any] | None = None
 

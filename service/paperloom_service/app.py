@@ -954,7 +954,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.put("/v1/reading/{document_id}")
     async def put_reading(document_id: str, patch: ReadingStatePatch):
         state.doc_or_404(document_id)
-        data = patch.model_dump(exclude_none=True)
+        # ``exclude_unset`` preserves the difference between "field omitted" and
+        # "selection explicitly cleared" (both would be None otherwise).
+        data = patch.model_dump(exclude_unset=True)
         return {"state": state.db.save_reading_state(document_id, **data)}
 
     @app.get("/v1/conversations")
