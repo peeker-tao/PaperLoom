@@ -33,3 +33,7 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Paragraph alignment is text-block level, not glyph level. Cross-column
   paragraphs may be merged; the UI reports the actual alignment quality.
 - Image-internal text is not re-rendered (figure images are kept as-is).
+- Real DeepSeek calls were not exercised in CI or in the development environment
+  (no API key); the protocol is covered by a fake LLM transport.
+- Interactive UI flows in Zotero require manual acceptance; plugin startup and
+  registration were verified on Zotero 10.0.8.
