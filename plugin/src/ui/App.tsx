@@ -107,6 +107,33 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
         </div>
 
         <div className="pl-body">
+          {state.translationStatus?.needsAttention ? (
+            <div className="pl-card pl-card--warn pl-small" style={{ margin: "8px 10px 0" }}>
+              <strong>
+                {state.translationStatus.stale > 0
+                  ? `${state.translationStatus.stale} 段译文的生成配置已变更`
+                  : `${state.translationStatus.unknown} 段译文缺少生成配置记录`}
+              </strong>
+              <div style={{ marginTop: 4 }}>
+                {state.translationStatus.reasonsText.length
+                  ? state.translationStatus.reasonsText.join("；")
+                  : "历史译文，无法确认是否与当前模型/术语一致"}
+              </div>
+              <div className="pl-actions">
+                <button
+                  type="button"
+                  className="pl-btn pl-btn--primary"
+                  disabled={state.translating}
+                  onClick={() => void controller.retranslateStale()}
+                >
+                  重译过时段落
+                </button>
+                <button type="button" className="pl-btn pl-btn--ghost" onClick={() => controller.dismissStale()}>
+                  保留现有译文
+                </button>
+              </div>
+            </div>
+          ) : null}
           {state.tab === "chat" ? <ChatPanel controller={controller} state={state} /> : null}
           {state.tab === "notes" ? <NotesPanel controller={controller} state={state} /> : null}
           {state.tab === "analysis" ? <AnalysisPanel controller={controller} state={state} /> : null}

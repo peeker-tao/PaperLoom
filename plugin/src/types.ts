@@ -143,6 +143,19 @@ export interface SettingsPayload {
   service: { version: string; apiVersion: number };
 }
 
+export interface TranslationStatus {
+  total: number;
+  current: number;
+  stale: number;
+  unknown: number;
+  missing: number;
+  reasons: string[];
+  reasonsText: string[];
+  staleSegmentIds: string[];
+  configKey: string;
+  needsAttention: boolean;
+}
+
 export interface ReadingState {
   page: number;
   mode: ReadMode;

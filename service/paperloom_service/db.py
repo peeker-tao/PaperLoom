@@ -139,6 +139,9 @@ MIGRATIONS: list[str] = [
     );
     """,
     """ALTER TABLE reading_state ADD COLUMN selection TEXT;""",
+    # Which configuration produced a translation. NULL means the row predates
+    # this column ("unknown" provenance); user data is preserved.
+    """ALTER TABLE segments ADD COLUMN translation_config TEXT;""",
 ]
 
 
@@ -304,6 +307,10 @@ class Database:
             for row in rows:
                 item = dict(row)
                 item["bbox"] = json.loads(item["bbox"])
+                raw_config = item.get("translation_config")
+                item["translationConfig"] = (
+                    json.loads(raw_config) if raw_config else None
+                )
                 out.append(item)
             return out
 
@@ -329,12 +336,22 @@ class Database:
             )
 
     def set_segment_done(
-        self, document_id: str, segment_id: str, translation: str
+        self,
+        document_id: str,
+        segment_id: str,
+        translation: str,
+        config: dict | None = None,
     ) -> None:
         with self.connect() as conn:
             conn.execute(
-                "UPDATE segments SET translation=? WHERE id=? AND document_id=?",
-                (translation, segment_id, document_id),
+                "UPDATE segments SET translation=?, translation_config=? "
+                "WHERE id=? AND document_id=?",
+                (
+                    translation,
+                    json.dumps(config, ensure_ascii=False) if config else None,
+                    segment_id,
+                    document_id,
+                ),
             )
 
     def search(self, doc_id: str, query: str, limit: int = 8) -> list[dict]:

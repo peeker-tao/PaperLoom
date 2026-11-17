@@ -183,6 +183,13 @@ export class ServiceClient {
     });
   }
 
+  translationStatus(documentId: string, model?: string) {
+    const query = model ? `?model=${encodeURIComponent(model)}` : "";
+    return this.request<import("../types").TranslationStatus>(
+      `/v1/documents/${documentId}/translation-status${query}`,
+    );
+  }
+
   listJobs(documentId: string, limit = 5) {
     return this.request<{ jobs: import("../types").Job[] }>(
       `/v1/jobs?documentId=${encodeURIComponent(documentId)}&limit=${limit}`,

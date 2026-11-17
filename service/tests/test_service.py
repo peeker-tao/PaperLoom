@@ -308,6 +308,98 @@ async def test_glossary_extract_fake(client, pdf_path):
     assert body["count"] == 0  # fake LLM returns a non-glossary payload on purpose
 
 
+async def test_translation_status_tracks_config_changes(client, pdf_path):
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+
+    initial = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert initial["total"] == 0
+    assert initial["missing"] > 0
+    assert initial["needsAttention"] is False
+
+    await wait_job(client, (await client.post("/v1/jobs", json={"documentId": doc_id})).json()["job"]["id"])
+
+    current = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert current["total"] > 0
+    assert current["stale"] == 0
+    assert current["current"] == current["total"]
+    assert current["missing"] == 0
+
+    # A different model invalidates every translation.
+    changed = (
+        await client.get(
+            f"/v1/documents/{doc_id}/translation-status", params={"model": "deepseek-v4-pro"}
+        )
+    ).json()
+    assert changed["stale"] == current["total"]
+    assert changed["needsAttention"] is True
+    assert "model" in changed["reasons"]
+    assert changed["reasonsText"]
+
+
+async def test_glossary_change_marks_translations_stale(client, pdf_path):
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+    await wait_job(client, (await client.post("/v1/jobs", json={"documentId": doc_id})).json()["job"]["id"])
+
+    await client.post(
+        "/v1/glossary",
+        json={"documentId": doc_id, "source": "sparse attention", "target": "稀疏注意力"},
+    )
+    status = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert status["stale"] == status["total"]
+    assert "glossary" in status["reasons"]
+
+
+async def test_stale_only_retranslates_just_the_changed_config(client, pdf_path):
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+    await wait_job(client, (await client.post("/v1/jobs", json={"documentId": doc_id})).json()["job"]["id"])
+
+    # Nothing stale: the job is a no-op instead of silently redoing everything.
+    job_id = (
+        await client.post("/v1/jobs", json={"documentId": doc_id, "staleOnly": True})
+    ).json()["job"]["id"]
+    job = await wait_job(client, job_id)
+    assert job["state"] == "succeeded"
+    options = job.get("options") or {}
+    assert options.get("staleOnly") is True
+
+    # Glossary change makes everything stale; staleOnly now does the work.
+    await client.post(
+        "/v1/glossary",
+        json={"documentId": doc_id, "source": "routing network", "target": "路由网络"},
+    )
+    status = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert status["stale"] > 0
+    job_id = (
+        await client.post("/v1/jobs", json={"documentId": doc_id, "staleOnly": True})
+    ).json()["job"]["id"]
+    job = await wait_job(client, job_id)
+    assert job["state"] == "succeeded"
+    after = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert after["stale"] == 0
+
+
+async def test_historical_translation_without_config_is_unknown(client, pdf_path):
+    """Rows written before provenance existed must be reported, not hidden."""
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+    await wait_job(client, (await client.post("/v1/jobs", json={"documentId": doc_id})).json()["job"]["id"])
+
+    app_state = client._transport.app.state.paperloom  # type: ignore[attr-defined]
+    with app_state.db.connect() as conn:
+        conn.execute(
+            "UPDATE segments SET translation_config=NULL WHERE document_id=? AND translation IS NOT NULL",
+            (doc_id,),
+        )
+    status = (await client.get(f"/v1/documents/{doc_id}/translation-status")).json()
+    assert status["unknown"] == status["total"]
+    assert status["stale"] == 0
+    assert "unknown" in status["reasons"]
+    assert status["needsAttention"] is True
+
+
 async def test_reading_state_roundtrip(client, pdf_path):
     data = await register(client, pdf_path)
     doc_id = data["document"]["id"]

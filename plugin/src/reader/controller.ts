@@ -16,6 +16,7 @@ import type {
   ServiceStatus,
   SidebarTab,
   Term,
+  TranslationStatus,
 } from "../types";
 import { attachmentContext, attachmentContextFromItem, bestPdfAttachment, createPrefs, currentPage, findPaperLoomNotes, jumpToPage, readerDocument } from "../zotero/api";
 
@@ -73,6 +74,7 @@ export interface UIState {
   alignmentNote: string;
   model: string;
   models: { id: string; label: string }[];
+  translationStatus: TranslationStatus | null;
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -106,6 +108,7 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     alignmentNote: "",
     model: "",
     models: [],
+    translationStatus: null,
   };
 }
 
@@ -207,6 +210,7 @@ export class ReaderController {
       await this.restoreReadingState();
       await this.restoreConversation();
       await this.restoreAnalysis();
+      await this.refreshTranslationStatus();
       await this.refreshNotes();
       await this.attachLatestJob();
       this.watchPageChanges();
@@ -793,6 +797,7 @@ export class ReaderController {
               `翻译完成：${data.translated ?? 0} 段` + (data.warnings?.length ? `（${data.warnings.length} 条提示）` : ""),
             );
             await this.reloadSegments();
+            await this.refreshTranslationStatus();
             await this.importArtifacts(jobId, data.artifacts);
           }
         }
@@ -818,6 +823,44 @@ export class ReaderController {
       this.notice("已取消翻译任务");
     } catch (error) {
       this.set({ error: this.friendlyError(error) });
+    }
+  }
+
+  /** Refresh which translations are still valid for the current configuration. */
+  async refreshTranslationStatus(): Promise<void> {
+    const document = this.state.document;
+    if (!document) {
+      return;
+    }
+    try {
+      const status = await this.client.translationStatus(document.id);
+      this.set({ translationStatus: status });
+    } catch (error) {
+      debug("translation status failed", errorText(error));
+    }
+  }
+
+  /** Re-translate only the segments produced by an outdated configuration. */
+  async retranslateStale(): Promise<void> {
+    const document = this.state.document;
+    if (!document || this.state.translating) {
+      return;
+    }
+    try {
+      const { job } = await this.client.startTranslation(document.id, { staleOnly: true });
+      this.set({ job });
+      await this.followJob(job.id);
+      await this.refreshTranslationStatus();
+    } catch (error) {
+      this.set({ error: this.friendlyError(error) });
+    }
+  }
+
+  /** Keep outdated translations as they are. */
+  dismissStale(): void {
+    const status = this.state.translationStatus;
+    if (status) {
+      this.set({ translationStatus: { ...status, stale: 0, unknown: 0, needsAttention: false } });
     }
   }
 
@@ -1080,6 +1123,7 @@ export class ReaderController {
       status: "confirmed",
     });
     await this.refreshTerms();
+    await this.refreshTranslationStatus();
     this.notice(
       result.affectedSegments
         ? `术语已保存；有 ${result.affectedSegments} 段旧译文可能受影响，可重新翻译`
@@ -1090,11 +1134,13 @@ export class ReaderController {
   async updateTerm(term: Term, patch: Record<string, unknown>): Promise<void> {
     await this.host.service.client.patchTerm(term.id, patch);
     await this.refreshTerms();
+    await this.refreshTranslationStatus();
   }
 
   async deleteTerm(term: Term): Promise<void> {
     await this.host.service.client.deleteTerm(term.id);
     await this.refreshTerms();
+    await this.refreshTranslationStatus();
   }
 
   async extractTerms(): Promise<void> {

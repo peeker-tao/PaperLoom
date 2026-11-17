@@ -49,7 +49,8 @@ from .models import (
 )
 from .pdf.babeldoc import engine_info
 from .pdf.extract import file_sha256, parse_pdf
-from .translate import document_id_for
+from .translate import SKIP_KINDS, _has_prose, document_id_for
+from .translation_config import TranslationConfig, evaluate
 from .urls import OFFICIAL_BASE_URL, check_base_url, normalize_base_url
 
 log = logging.getLogger("paperloom.app")
@@ -439,6 +440,29 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "segmentCount": len(parsed["segments"]),
         }
 
+    @app.get("/v1/documents/{document_id}/translation-status")
+    async def translation_status(document_id: str, model: str | None = None):
+        doc = state.doc_or_404(document_id)
+        segments = state.db.get_segments(document_id)
+        terms = state.db.list_terms(document_id)
+        config = TranslationConfig.build(
+            model=model or state.settings.translate_model,
+            base_url=state.settings.base_url,
+            terms=terms,
+            max_output=state.settings.max_output_tokens,
+            document_hash=doc.get("file_hash", ""),
+        )
+        status = evaluate(
+            segments,
+            config,
+            translatable=lambda seg: seg.get("kind") not in SKIP_KINDS
+            and _has_prose(seg["text"]),
+        )
+        payload = status.as_dict()
+        payload["config"] = config.as_dict()
+        payload["promptVersion"] = config.prompt_version
+        return payload
+
     # ------------------------------------------------------------------ #
     # Jobs
     # ------------------------------------------------------------------ #
@@ -451,6 +475,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             pages=req.pages,
             model=req.model,
             force=req.force,
+            stale_only=req.stale_only,
             use_babeldoc=req.use_babeldoc,
         )
         return {"job": job}

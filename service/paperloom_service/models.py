@@ -32,6 +32,11 @@ class TranslateRequest(BaseModel):
     model: str | None = None
     use_babeldoc: bool | None = Field(default=None, alias="useBabeldoc")
     force: bool = False
+    stale_only: bool = Field(
+        default=False,
+        alias="staleOnly",
+        description="re-translate only segments whose generation config changed",
+    )
 
     model_config = {"populate_by_name": True}
 

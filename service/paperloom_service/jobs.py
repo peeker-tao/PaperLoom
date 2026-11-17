@@ -47,6 +47,7 @@ class JobManager:
         pages: list[int] | None = None,
         model: str | None = None,
         force: bool = False,
+        stale_only: bool = False,
         use_babeldoc: bool | None = None,
     ) -> dict:
         job_id = uuid.uuid4().hex[:16]
@@ -61,6 +62,7 @@ class JobManager:
                 "pages": pages,
                 "model": model,
                 "force": force,
+                "staleOnly": stale_only,
                 "useBabeldoc": use_babeldoc,
             },
             "created_at": now(),
@@ -81,6 +83,7 @@ class JobManager:
             pages=options.get("pages"),
             model=options.get("model"),
             force=options.get("force", False),
+            stale_only=options.get("staleOnly", False),
             use_babeldoc=options.get("useBabeldoc"),
         )
 
@@ -208,6 +211,7 @@ class JobManager:
                 pages=options.get("pages"),
                 model=options.get("model"),
                 force=bool(options.get("force")),
+                stale_only=bool(options.get("staleOnly")),
                 use_babeldoc=options.get("useBabeldoc"),
                 cancel_token=token,
                 on_progress=on_progress,

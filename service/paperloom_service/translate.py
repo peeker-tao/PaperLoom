@@ -15,6 +15,7 @@ from .glossary import glossary_block, glossary_signature
 from .pdf.babeldoc import EngineMissing
 from .pdf.babeldoc import translate_pdf as babeldoc_translate
 from .pdf.extract import parse_pdf
+from .translation_config import TranslationConfig, evaluate
 
 log = logging.getLogger("paperloom.translate")
 
@@ -62,8 +63,10 @@ def document_id_for(
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def _cache_key(model: str, signature: str, text: str) -> str:
-    return hashlib.sha1(f"{model}|{signature}|{text}".encode()).hexdigest()
+def _cache_key(model: str, signature: str, text: str, prompt_version: int = 0) -> str:
+    return hashlib.sha1(
+        f"{model}|{signature}|{prompt_version}|{text}".encode()
+    ).hexdigest()
 
 
 def _batches(segments: list[dict]) -> list[list[dict]]:
@@ -191,13 +194,18 @@ async def translate_document(
     pages: list[int] | None = None,
     model: str | None = None,
     force: bool = False,
+    stale_only: bool = False,
     use_babeldoc: bool | None = None,
     cancel_token: asyncio.Event | None = None,
     on_progress=None,
     on_segment=None,
     on_log=None,
 ) -> dict:
-    """Translate a registered document and return a result summary."""
+    """Translate a registered document and return a result summary.
+
+    ``force`` re-translates everything; ``stale_only`` re-translates exactly
+    the segments whose stored generation config differs from the current one.
+    """
     model = model or settings.translate_model
     doc = db.get_document(document_id)
     if not doc:
@@ -261,22 +269,63 @@ async def translate_document(
 
     terms = db.list_terms(document_id)
     signature = glossary_signature(terms)
+    config = TranslationConfig.build(
+        model=model,
+        base_url=settings.base_url,
+        terms=terms,
+        max_output=settings.max_output_tokens,
+        document_hash=doc.get("file_hash", ""),
+    )
+    config_dict = config.as_dict()
+
+    stale_ids: set[str] = set()
+    if stale_only and not force:
+        status = evaluate(
+            segments,
+            config,
+            translatable=lambda seg: seg.get("kind") not in SKIP_KINDS
+            and _has_prose(seg["text"]),
+        )
+        stale_ids = set(status.stale_ids)
+        # Historical rows without provenance cannot be proven current; they are
+        # included in stale_ids so an explicit request can refresh them.
+        if not stale_ids:
+            await progress(0, 0, 1, "没有需要重译的段落")
+
     pending: list[dict] = []
     cached_hits = 0
     for seg in selected:
-        if seg.get("translation") and not force:
+        if stale_only and not force and seg["id"] not in stale_ids:
+            continue
+        existing = seg.get("translationConfig") or seg.get("translation_config")
+        is_current = isinstance(existing, dict) and existing.get("key") == config.key
+        if seg.get("translation") and not force and (is_current or not stale_only):
             continue
         if not force:
             cached = db.get_cached_translation(
-                _cache_key(model, signature, seg["text"])
+                _cache_key(model, signature, seg["text"], config.prompt_version)
             )
             if cached:
-                db.set_segment_done(document_id, seg["id"], cached)
+                db.set_segment_done(document_id, seg["id"], cached, config_dict)
                 cached_hits += 1
                 if on_segment:
                     await on_segment(seg["id"], cached, "cache")
                 continue
         pending.append(seg)
+
+    if stale_only and not force and not pending:
+        return {
+            "usage": {"promptTokens": 0, "completionTokens": 0, "estimated": False},
+            "artifacts": [],
+            "warnings": [],
+            "failures": [],
+            "translated": 0,
+            "total": len(selected),
+            "cached": cached_hits,
+            "alignment": doc.get("alignment", "segment"),
+            "config": config_dict,
+            "staleOnly": True,
+        }
 
     total = len(selected)
     done = total - len(pending)
@@ -303,9 +352,12 @@ async def translate_document(
             if not text:
                 failures.append(seg["id"])
                 continue
-            db.set_segment_done(document_id, seg["id"], text)
+            db.set_segment_done(document_id, seg["id"], text, config_dict)
             db.put_cached_translation(
-                _cache_key(model, signature, seg["text"]), model, seg["text"], text
+                _cache_key(model, signature, seg["text"], config.prompt_version),
+                model,
+                seg["text"],
+                text,
             )
             if on_segment:
                 await on_segment(seg["id"], text, "translated")
@@ -390,4 +442,6 @@ async def translate_document(
         "total": total,
         "cached": cached_hits,
         "alignment": db.get_document(document_id).get("alignment", "segment"),
+        "config": config_dict,
+        "staleOnly": stale_only,
     }
