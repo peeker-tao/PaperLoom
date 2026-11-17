@@ -131,6 +131,14 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
             value={form.baseUrl}
             onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
           />
+          {payload?.baseUrlCheck ? (
+            <div
+              className="pl-small"
+              style={{ marginTop: 4, color: payload.baseUrlCheck.ok ? "#45514c" : "#a33a2c" }}
+            >
+              {payload.baseUrlCheck.message}
+            </div>
+          ) : null}
         </div>
         <div className="pl-field">
           <label className="pl-label">API Key（仅保存在本机服务，使用系统加密存储）</label>

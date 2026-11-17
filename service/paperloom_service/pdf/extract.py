@@ -22,7 +22,9 @@ log = logging.getLogger("paperloom.pdf")
 MIN_CHARS_PER_PAGE = 60
 SENTENCE_END = tuple(".!?:。！？；;")
 MATH_CHARS = set("∑∫√±≤≥≈∈∂∇αβγθλμσφωΩΔπ×÷≠∞")
-CAPTION_RE = re.compile(r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE)
+CAPTION_RE = re.compile(
+    r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE
+)
 SECTION_RE = re.compile(r"^(\d+(\.\d+)*|[IVX]+\.)\s+\S")
 REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
 PAGE_NUMBER_RE = re.compile(r"^\s*(page\s*)?\d{1,4}\s*$", re.IGNORECASE)
@@ -81,10 +83,14 @@ def _line_from_layout(line: LTTextLine, page: int) -> TextLine | None:
 
 def extract_lines(path: Path) -> tuple[list[TextLine], dict[int, tuple[float, float]]]:
     """Return all horizontal text lines with page dimensions."""
-    laparams = LAParams(line_margin=0.25, char_margin=2.0, word_margin=0.1, boxes_flow=None)
+    laparams = LAParams(
+        line_margin=0.25, char_margin=2.0, word_margin=0.1, boxes_flow=None
+    )
     lines: list[TextLine] = []
     sizes: dict[int, tuple[float, float]] = {}
-    for page_number, layout in enumerate(extract_pages(str(path), laparams=laparams), start=1):
+    for page_number, layout in enumerate(
+        extract_pages(str(path), laparams=laparams), start=1
+    ):
         sizes[page_number] = (float(layout.width), float(layout.height))
         for element in layout:
             if not isinstance(element, LTTextContainer):
@@ -107,8 +113,12 @@ def _order_page(lines: list[TextLine], width: float) -> list[TextLine]:
     if not lines:
         return []
     mid = width / 2
-    left = [ln for ln in lines if ln.x1 < mid + width * 0.02 and ln.x0 < mid - width * 0.05]
-    right = [ln for ln in lines if ln.x0 > mid - width * 0.02 and ln.x1 > mid + width * 0.05]
+    left = [
+        ln for ln in lines if ln.x1 < mid + width * 0.02 and ln.x0 < mid - width * 0.05
+    ]
+    right = [
+        ln for ln in lines if ln.x0 > mid - width * 0.02 and ln.x1 > mid + width * 0.05
+    ]
     full = [ln for ln in lines if ln not in left and ln not in right]
     is_two_column = (
         len(left) >= 5
@@ -120,11 +130,19 @@ def _order_page(lines: list[TextLine], width: float) -> list[TextLine]:
 
     col_top = max(max(ln.y1 for ln in left), max(ln.y1 for ln in right))
     col_bottom = min(min(ln.y0 for ln in left), min(ln.y0 for ln in right))
-    before = sorted([ln for ln in full if ln.y0 >= col_top - 2], key=lambda ln: (-ln.y1, ln.x0))
-    after = sorted([ln for ln in full if ln.y1 <= col_bottom + 2], key=lambda ln: (-ln.y1, ln.x0))
+    before = sorted(
+        [ln for ln in full if ln.y0 >= col_top - 2], key=lambda ln: (-ln.y1, ln.x0)
+    )
+    after = sorted(
+        [ln for ln in full if ln.y1 <= col_bottom + 2], key=lambda ln: (-ln.y1, ln.x0)
+    )
     inside = [ln for ln in full if ln not in before and ln not in after]
-    left_col = sorted(left + [ln for ln in inside if ln.x0 < mid], key=lambda ln: -ln.y1)
-    right_col = sorted(right + [ln for ln in inside if ln.x0 >= mid], key=lambda ln: -ln.y1)
+    left_col = sorted(
+        left + [ln for ln in inside if ln.x0 < mid], key=lambda ln: -ln.y1
+    )
+    right_col = sorted(
+        right + [ln for ln in inside if ln.x0 >= mid], key=lambda ln: -ln.y1
+    )
     return before + left_col + right_col + after
 
 
@@ -192,7 +210,12 @@ def _join(a: str, b: str) -> str:
 def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
     text = seg["text"]
     size = seg.get("size", body_size)
-    if page == 1 and seg["ordinal"] <= 1 and size >= body_size * 1.25 and len(text) < 400:
+    if (
+        page == 1
+        and seg["ordinal"] <= 1
+        and size >= body_size * 1.25
+        and len(text) < 400
+    ):
         return "title"
     if CAPTION_RE.match(text):
         return "caption"
@@ -265,7 +288,9 @@ def parse_pdf(path: Path, title: str = "") -> dict:
         by_page.setdefault(line.page, []).append(line)
     by_page = _drop_running_heads(by_page, sizes)
 
-    ordered = {p: _order_page(by_page.get(p, []), sizes.get(p, (612.0, 0))[0]) for p in sizes}
+    ordered = {
+        p: _order_page(by_page.get(p, []), sizes.get(p, (612.0, 0))[0]) for p in sizes
+    }
     all_sizes = [ln.size for p in ordered for ln in ordered[p] if ln.size > 0]
     body_size = statistics.median(all_sizes) if all_sizes else 10.0
 
@@ -307,7 +332,9 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     extracted_chars = sum(len(ln.text) for p in by_page for ln in by_page[p])
     segment_chars = sum(len(seg["text"]) for seg in merged_segments)
     pages_with_text = sum(
-        1 for p in by_page if sum(len(ln.text) for ln in by_page[p]) >= MIN_CHARS_PER_PAGE
+        1
+        for p in by_page
+        if sum(len(ln.text) for ln in by_page[p]) >= MIN_CHARS_PER_PAGE
     )
     scanned = pages_with_text < max(1, int(page_count * 0.5))
     coverage = (segment_chars / extracted_chars) if extracted_chars else 0.0

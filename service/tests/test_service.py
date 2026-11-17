@@ -39,6 +39,30 @@ async def test_status_and_settings(client):
     assert settings["settings"]["base_url"] == "https://api.deepseek.com"
     assert "apiKey" not in settings["settings"]
     assert any(m["id"] == "deepseek-flash" for m in settings["models"])
+    check = settings["baseUrlCheck"]
+    assert check["ok"] is True
+    assert check["endpoint"] == "https://api.deepseek.com/chat/completions"
+    assert check["sdkBase"] == "https://api.deepseek.com/v1"
+
+
+async def test_settings_normalizes_base_url(client):
+    response = await client.post(
+        "/v1/settings", json={"baseUrl": "https://api.deepseek.com/v1/"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["settings"]["base_url"] == "https://api.deepseek.com/v1"
+    assert body["baseUrlCheck"]["endpoint"] == "https://api.deepseek.com/v1/chat/completions"
+    assert "/v1/v1" not in body["baseUrlCheck"]["endpoint"]
+
+    response = await client.post("/v1/settings", json={"baseUrl": "https://api.deepseek.com"})
+    assert response.json()["settings"]["base_url"] == "https://api.deepseek.com"
+
+
+async def test_settings_rejects_invalid_base_url(client):
+    response = await client.post("/v1/settings", json={"baseUrl": "ftp://example.com"})
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "bad_base_url"
 
 
 async def test_settings_store_masks_key(client):

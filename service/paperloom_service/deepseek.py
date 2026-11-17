@@ -19,6 +19,8 @@ from typing import Any
 
 import httpx
 
+from .urls import chat_completions_url
+
 log = logging.getLogger("paperloom.deepseek")
 
 
@@ -55,13 +57,6 @@ class _RateLimiter:
             self._next = max(now, self._next) + 1.0 / self.qps
         if wait > 0:
             await asyncio.sleep(wait)
-
-
-def _endpoint(base_url: str, path: str) -> str:
-    base = (base_url or "https://api.deepseek.com").rstrip("/")
-    if base.endswith(("/v1", "/beta")):
-        return base + path
-    return base + path
 
 
 def _classify(status: int, body: str) -> DeepSeekError:
@@ -139,6 +134,10 @@ class DeepSeekClient:
             "Accept": "text/event-stream",
         }
 
+    @property
+    def endpoint(self) -> str:
+        return chat_completions_url(self.base_url)
+
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             timeout=httpx.Timeout(self.timeout, connect=self.connect_timeout),
@@ -191,7 +190,7 @@ class DeepSeekClient:
                     await self._limiter.acquire()
                     async with self._client() as client, client.stream(
                         "POST",
-                        _endpoint(self.base_url, "/chat/completions"),
+                        chat_completions_url(self.base_url),
                         headers=self._headers(),
                         json=payload,
                     ) as response:
@@ -307,7 +306,7 @@ class DeepSeekClient:
                     await self._limiter.acquire()
                     async with self._client() as client:
                         response = await client.post(
-                            _endpoint(self.base_url, "/chat/completions"),
+                            chat_completions_url(self.base_url),
                             headers=self._headers(),
                             json=payload,
                         )

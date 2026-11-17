@@ -50,6 +50,7 @@ from .models import (
 from .pdf.babeldoc import engine_info
 from .pdf.extract import file_sha256, parse_pdf
 from .translate import document_id_for
+from .urls import OFFICIAL_BASE_URL, check_base_url, normalize_base_url
 
 log = logging.getLogger("paperloom.app")
 
@@ -237,8 +238,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         return {
             "settings": {
                 **state.settings.public(),
-                "baseUrlDefault": "https://api.deepseek.com",
+                "baseUrlDefault": OFFICIAL_BASE_URL,
             },
+            "baseUrlCheck": check_base_url(state.settings.base_url).as_dict(),
             "apiKey": api_key_status(cfg),
             "pricing": load_pricing(cfg),
             "models": [
@@ -261,6 +263,13 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         for key, value in data.items():
             if hasattr(state.settings, key):
                 setattr(state.settings, key, value)
+        try:
+            state.settings.base_url = normalize_base_url(state.settings.base_url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "bad_base_url", "message": f"Base URL 无效：{exc}"},
+            ) from exc
         save_settings(cfg, state.settings)
         if api_key is not None:
             if api_key.strip():
@@ -270,8 +279,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         return {
             "settings": {
                 **state.settings.public(),
-                "baseUrlDefault": "https://api.deepseek.com",
+                "baseUrlDefault": OFFICIAL_BASE_URL,
             },
+            "baseUrlCheck": check_base_url(state.settings.base_url).as_dict(),
             "apiKey": api_key_status(cfg),
         }
 
@@ -283,9 +293,21 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         except (json.JSONDecodeError, UnicodeDecodeError):
             body = {}
         model = (body or {}).get("model") or state.settings.chat_model
+        raw_base = (body or {}).get("baseUrl")
+        if raw_base:
+            check = check_base_url(raw_base)
+            if not check.ok:
+                return {
+                    "ok": False,
+                    "error": {"code": "bad_base_url", "message": check.message, "retryable": False},
+                }
+            settings = Settings(**{**state.settings.public(), "base_url": check.normalized})
+            client = state.client(settings)
+        else:
+            client = state.client()
         try:
-            result = await state.client().test_connection(model)
-            return {"ok": True, **result}
+            result = await client.test_connection(model)
+            return {"ok": True, "baseUrl": client.endpoint, **result}
         except DeepSeekError as exc:
             return {"ok": False, "error": exc.as_dict()}
         except Exception as exc:  # noqa: BLE001 - surfaced to the UI as a diagnostic
@@ -913,7 +935,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.get("/v1/analyses")
     async def list_analyses(documentId: str, limit: int = 10):
         state.doc_or_404(documentId)
-        return {"analyses": state.db.list_analyses(documentId, limit=max(1, min(limit, 50)))}
+        return {
+            "analyses": state.db.list_analyses(documentId, limit=max(1, min(limit, 50)))
+        }
 
     @app.get("/v1/conversations/{conversation_id}/messages")
     async def conversation_messages(conversation_id: str, limit: int = 200):

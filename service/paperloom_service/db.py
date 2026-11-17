@@ -169,8 +169,12 @@ class Database:
 
     def migrate(self) -> None:
         with self.connect() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
-            row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+            )
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key='schema_version'"
+            ).fetchone()
             current = int(row["value"]) if row else 0
             for index, script in enumerate(MIGRATIONS, start=1):
                 if index <= current:
@@ -247,7 +251,9 @@ class Database:
 
     def get_document(self, doc_id: str) -> dict | None:
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM documents WHERE id=?", (doc_id,)
+            ).fetchone()
             return dict(row) if row else None
 
     def list_documents(self, limit: int = 50) -> list[dict]:
@@ -304,7 +310,8 @@ class Database:
     def get_segment(self, doc_id: str, segment_id: str) -> dict | None:
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT * FROM segments WHERE document_id=? AND id=?", (doc_id, segment_id)
+                "SELECT * FROM segments WHERE document_id=? AND id=?",
+                (doc_id, segment_id),
             ).fetchone()
             if not row:
                 return None
@@ -312,14 +319,18 @@ class Database:
             item["bbox"] = json.loads(item["bbox"])
             return item
 
-    def update_translation(self, document_id: str, segment_id: str, translation: str) -> None:
+    def update_translation(
+        self, document_id: str, segment_id: str, translation: str
+    ) -> None:
         with self.connect() as conn:
             conn.execute(
                 "UPDATE segments SET translation=? WHERE document_id=? AND id=?",
                 (translation, document_id, segment_id),
             )
 
-    def set_segment_done(self, document_id: str, segment_id: str, translation: str) -> None:
+    def set_segment_done(
+        self, document_id: str, segment_id: str, translation: str
+    ) -> None:
         with self.connect() as conn:
             conn.execute(
                 "UPDATE segments SET translation=? WHERE id=? AND document_id=?",
@@ -367,7 +378,15 @@ class Database:
             )
 
     def update_job(self, job_id: str, **fields: Any) -> None:
-        allowed = {"state", "stage", "progress", "error", "usage", "artifacts", "document_id"}
+        allowed = {
+            "state",
+            "stage",
+            "progress",
+            "error",
+            "usage",
+            "artifacts",
+            "document_id",
+        }
         sets, params = [], []
         for key, value in fields.items():
             if key not in allowed:
@@ -423,7 +442,12 @@ class Database:
                 (job_id, after),
             ).fetchall()
             return [
-                {"seq": r["seq"], "event": r["event"], "data": json.loads(r["data"]), "at": r["at"]}
+                {
+                    "seq": r["seq"],
+                    "event": r["event"],
+                    "data": json.loads(r["data"]),
+                    "at": r["at"],
+                }
                 for r in rows
             ]
 
@@ -432,9 +456,13 @@ class Database:
     # ------------------------------------------------------------------ #
     def ensure_conversation(self, conv_id: str, doc_id: str, title: str = "") -> None:
         with self.connect() as conn:
-            row = conn.execute("SELECT id FROM conversations WHERE id=?", (conv_id,)).fetchone()
+            row = conn.execute(
+                "SELECT id FROM conversations WHERE id=?", (conv_id,)
+            ).fetchone()
             if row:
-                conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (now(), conv_id))
+                conn.execute(
+                    "UPDATE conversations SET updated_at=? WHERE id=?", (now(), conv_id)
+                )
                 return
             conn.execute(
                 "INSERT INTO conversations(id, document_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
@@ -523,7 +551,9 @@ class Database:
                     (doc_id,),
                 ).fetchall()
             else:
-                rows = conn.execute("SELECT * FROM terms ORDER BY scope, source").fetchall()
+                rows = conn.execute(
+                    "SELECT * FROM terms ORDER BY scope, source"
+                ).fetchall()
             return [dict(r) for r in rows]
 
     def delete_term(self, term_id: str) -> bool:
@@ -536,7 +566,9 @@ class Database:
     # ------------------------------------------------------------------ #
     def get_reading_state(self, doc_id: str) -> dict | None:
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM reading_state WHERE document_id=?", (doc_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM reading_state WHERE document_id=?", (doc_id,)
+            ).fetchone()
             if not row:
                 return None
             data = dict(row)
@@ -595,12 +627,16 @@ class Database:
 
     def get_analysis(self, analysis_id: str) -> dict | None:
         with self.connect() as conn:
-            row = conn.execute("SELECT * FROM analyses WHERE id=?", (analysis_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM analyses WHERE id=?", (analysis_id,)
+            ).fetchone()
             return _analysis_row(row) if row else None
 
     def list_analyses(self, doc_id: str, limit: int = 10) -> list[dict]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM analyses ORDER BY created_at DESC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM analyses ORDER BY created_at DESC"
+            ).fetchall()
         result = []
         for row in rows:
             item = _analysis_row(row)
@@ -617,7 +653,9 @@ class Database:
             ).fetchone()
             return row["target"] if row else None
 
-    def put_cached_translation(self, key: str, model: str, source: str, target: str) -> None:
+    def put_cached_translation(
+        self, key: str, model: str, source: str, target: str
+    ) -> None:
         with self.connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO translation_cache(key, model, source, target, created_at) VALUES (?,?,?,?,?)",
@@ -628,7 +666,11 @@ class Database:
 def _job_row(row: sqlite3.Row) -> dict:
     job = dict(row)
     for key in ("progress", "error", "usage", "artifacts", "options"):
-        job[key] = json.loads(job[key]) if job.get(key) else (None if key != "artifacts" else [])
+        job[key] = (
+            json.loads(job[key])
+            if job.get(key)
+            else (None if key != "artifacts" else [])
+        )
     job["id"] = job["id"]
     job["createdAt"] = job.pop("created_at")
     job["updatedAt"] = job.pop("updated_at")
@@ -653,7 +695,9 @@ def _fts5_available(conn: sqlite3.Connection) -> bool:
         return False
 
 
-def _create_fts_fallback(conn: sqlite3.Connection) -> None:  # pragma: no cover - rare builds
+def _create_fts_fallback(
+    conn: sqlite3.Connection,
+) -> None:  # pragma: no cover - rare builds
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_segment_fts_like ON segment_fts(document_id, text)"
     )

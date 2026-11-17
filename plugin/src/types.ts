@@ -132,6 +132,13 @@ export interface SettingsPayload {
     baseUrlDefault: string;
   };
   apiKey: ApiKeyStatus;
+  baseUrlCheck?: {
+    ok: boolean;
+    normalized: string;
+    endpoint: string;
+    sdkBase: string;
+    message: string;
+  };
   models: { id: string; label: string }[];
   service: { version: string; apiVersion: number };
 }

@@ -15,6 +15,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from ..urls import openai_sdk_base_url
+
 log = logging.getLogger("paperloom.babeldoc")
 
 
@@ -62,7 +64,7 @@ def _write_config(
         "[babeldoc]",
         "openai = true",
         f"openai-model = {q(model)}",
-        f"openai-base-url = {q(base_url.rstrip('/') + '/v1')}",
+        f"openai-base-url = {q(openai_sdk_base_url(base_url))}",
         f"openai-api-key = {q(api_key)}",
         f"lang-in = {q(lang_in)}",
         f"lang-out = {q(lang_out)}",
