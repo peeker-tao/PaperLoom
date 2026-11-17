@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/peeker-tao/PaperLoom/schemas/document.json",
+  "title": "Parsed document and segments",
+  "definitions": {
+    "Rect": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "[x0, y0, x1, y1] in PDF points, origin bottom-left"
+    },
+    "Segment": {
+      "type": "object",
+      "required": ["id", "page", "text", "bbox", "kind"],
+      "properties": {
+        "id": { "type": "string", "description": "stable: p{page}-s{ordinal}" },
+        "page": { "type": "integer", "minimum": 1 },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "translation": { "type": "string" },
+        "bbox": { "$ref": "#/definitions/Rect" },
+        "kind": {
+          "type": "string",
+          "enum": ["title", "heading", "body", "abstract", "caption", "formula", "reference", "other"]
+        },
+        "align": {
+          "type": "string",
+          "enum": ["exact", "merged", "page"],
+          "description": "exact = single block; merged = multiple blocks merged; page = only page-level fallback"
+        }
+      }
+    },
+    "Document": {
+      "type": "object",
+      "required": ["id", "pages", "alignment", "segments"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "pages": { "type": "integer", "minimum": 1 },
+        "alignment": { "type": "string", "enum": ["segment", "page", "none"] },
+        "alignmentNote": { "type": "string" },
+        "scanned": { "type": "boolean" },
+        "textChars": { "type": "integer" },
+        "segments": { "type": "array", "items": { "$ref": "#/definitions/Segment" } }
+      }
+    }
+  },
+  "type": "object",
+  "properties": {
+    "document": { "$ref": "#/definitions/Document" }
+  }
+}

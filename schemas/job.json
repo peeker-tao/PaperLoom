@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/peeker-tao/PaperLoom/schemas/job.json",
+  "title": "Translation job",
+  "definitions": {
+    "JobState": {
+      "type": "string",
+      "enum": ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]
+    },
+    "AlignmentLevel": {
+      "type": "string",
+      "enum": ["segment", "page", "none"],
+      "description": "segment = paragraph-level mapping verified; page = only page-level fallback available"
+    },
+    "Job": {
+      "type": "object",
+      "required": ["id", "state", "createdAt", "progress"],
+      "properties": {
+        "id": { "type": "string" },
+        "state": { "$ref": "#/definitions/JobState" },
+        "stage": {
+          "type": "string",
+          "enum": ["queued", "extracting", "translating", "layout", "finalizing", "done"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "progress": {
+          "type": "object",
+          "required": ["done", "total"],
+          "properties": {
+            "done": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 },
+            "page": { "type": "integer", "minimum": 1 },
+            "message": { "type": "string" }
+          }
+        },
+        "documentId": { "type": "string" },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "auth | rate_limit | insufficient_balance | timeout | aborted | scanned_pdf | parse_error | engine_missing | internal"
+            },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "promptTokens": { "type": "integer" },
+            "completionTokens": { "type": "integer" },
+            "estimated": { "type": "boolean" }
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "path"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["mono", "dual", "segments"] },
+              "path": { "type": "string" },
+              "bytes": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "JobEvent": {
+      "type": "object",
+      "required": ["event", "jobId", "seq"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": ["job", "progress", "segment", "log", "error", "done"]
+        },
+        "jobId": { "type": "string" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "at": { "type": "string", "format": "date-time" },
+        "data": { "type": "object" }
+      }
+    }
+  },
+  "type": "object",
+  "properties": {
+    "job": { "$ref": "#/definitions/Job" },
+    "event": { "$ref": "#/definitions/JobEvent" }
+  }
+}

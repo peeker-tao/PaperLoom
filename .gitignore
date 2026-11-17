@@ -1,0 +1,56 @@
+# --- dependencies ---
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# --- build outputs ---
+plugin/dist/
+dist/
+build/
+*.xpi
+*.zip
+*.tsbuildinfo
+
+# --- runtime data (never commit) ---
+data/
+service/data/
+service/.data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+logs/
+.cache/
+*.log
+
+# --- secrets ---
+.env
+.env.*
+!.env.example
+token
+token.txt
+secrets.json
+*.pem
+*.key
+*.pfx
+
+# --- user papers / translated artifacts ---
+papers/
+translations/
+artifacts/
+storage/
+*.pdf
+!docs/assets/**/*.pdf
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/

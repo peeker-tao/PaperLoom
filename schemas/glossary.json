@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/peeker-tao/PaperLoom/schemas/glossary.json",
+  "title": "Glossary entry",
+  "definitions": {
+    "Term": {
+      "type": "object",
+      "required": ["id", "source", "target", "scope", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "target": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "scope": { "type": "string", "enum": ["paper", "global"] },
+        "status": { "type": "string", "enum": ["suggested", "confirmed"] },
+        "documentId": { "type": "string" },
+        "note": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "type": "object",
+  "properties": {
+    "term": { "$ref": "#/definitions/Term" },
+    "terms": { "type": "array", "items": { "$ref": "#/definitions/Term" } }
+  }
+}
