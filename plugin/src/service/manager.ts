@@ -164,13 +164,12 @@ export class ServiceManager {
   }
 
   private async spawn(): Promise<void> {
-    const python = await findPython(this.prefs);
-    if (!python) {
-      this.lastError =
-        "未找到 Python。请安装 Python 3.10+ 并执行 `pip install -e service`，" +
-        "或在 Zotero 设置 extensions.paperloom.pythonPath 中填写 python.exe 的绝对路径。";
+    const found = await findPython(this.prefs);
+    if (!found.path) {
+      this.lastError = found.error;
       return;
     }
+    const python = found.path;
     const port = await this.firstFreePort();
     if (!port) {
       this.lastError = `端口 ${PORT_RANGE_START}-${PORT_RANGE_END} 均被占用`;
@@ -205,9 +204,18 @@ export class ServiceManager {
         return;
       }
     }
+    // The child usually died because a dependency is missing. Run the service's
+    // own self-check to report the real reason instead of a bare timeout.
+    const diagnosis = await diagnose(python);
+    const hint = /no module named|modulenotfound/i.test(diagnosis)
+      ? `请在 ${python} 下执行 \`pip install -e service\`，` +
+        "或在设置 extensions.paperloom.pythonPath 中指向已安装依赖的 python.exe。"
+      : "";
     this.lastError =
-      `本地服务在 30 秒内未就绪。请查看日志 ${PathUtils.join(this.dataDir, "logs", "service.log")}` +
-      "，或手动运行 `python -m paperloom_service --check`。";
+      `本地服务在 30 秒内未就绪。` +
+      (diagnosis ? `检测结果：${diagnosis}。` : "") +
+      hint +
+      `日志：${PathUtils.join(this.dataDir, "logs", "service.log")}`;
   }
 
   private async firstFreePort(): Promise<number | null> {
@@ -297,17 +305,105 @@ async function looksFree(port: number): Promise<boolean> {
   }
 }
 
-async function findPython(prefs: { get(key: string, fallback: unknown): unknown }): Promise<string | null> {
+/** Prints a machine-readable marker and fails when the version is too old. */
+const PROBE_SCRIPT = [
+  "import sys",
+  "v = sys.version_info",
+  "print('PAPERLOOM_PY=%d.%d.%d' % (v[0], v[1], v[2]))",
+  "sys.exit(0 if (v[0], v[1]) >= (3, 10) else 3)",
+].join("\n");
+
+interface PythonGuess {
+  path: string;
+  error: string;
+}
+
+/** Run a command and collect its output, or "" when it cannot be started. */
+async function runCapture(command: string, args: string[]): Promise<string> {
+  try {
+    const { Subprocess } = ChromeUtils.importESModule(
+      "resource://gre/modules/Subprocess.sys.mjs",
+    );
+    const proc = await Subprocess.call({
+      command,
+      arguments: args,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr] = await Promise.all([
+      proc.stdout.readString(),
+      proc.stderr.readString(),
+    ]);
+    await proc.wait();
+    return `${stdout}\n${stderr}`.trim();
+  } catch (error) {
+    return errorText(error);
+  }
+}
+
+/** Ask `paperloom_service --check` why the service cannot start. */
+async function diagnose(python: string): Promise<string> {
+  const output = await runCapture(python, ["-m", "paperloom_service", "--check"]);
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return "";
+  }
+  // ModuleNotFoundError / missing dependency is the common case.
+  const interesting = lines.find((line) => /error|missing|not found|失败/i.test(line));
+  return (interesting || lines[lines.length - 1]).slice(0, 300);
+}
+
+/**
+ * Verify a candidate interpreter by actually running it.
+ *
+ * A path existing on disk proves nothing on Windows: the Store alias in
+ * `WindowsApps` exists for every user and launches the Store instead of Python.
+ */
+async function probePython(exe: string): Promise<{ ok: boolean; detail: string }> {
+  const output = await runCapture(exe, ["-c", PROBE_SCRIPT]);
+  const match = output.match(/PAPERLOOM_PY=(\d+\.\d+\.\d+)/);
+  if (!match) {
+    return { ok: false, detail: output.split(/\r?\n/).pop() || "" };
+  }
+  const [major, minor] = match[1].split(".").map(Number);
+  if (major < 3 || (major === 3 && minor < 10)) {
+    return { ok: false, detail: `版本过低（${match[1]}），需要 3.10+` };
+  }
+  return { ok: true, detail: match[1] };
+}
+
+async function findPython(prefs: {
+  get(key: string, fallback: unknown): unknown;
+}): Promise<PythonGuess> {
   const configured = String(prefs.get("extensions.paperloom.pythonPath", "") || "").trim();
   if (configured) {
-    return (await pathExists(configured)) ? configured : null;
+    if (!(await pathExists(configured))) {
+      return {
+        path: "",
+        error: `设置中的 Python 路径不存在：${configured}。请修改 extensions.paperloom.pythonPath。`,
+      };
+    }
+    const probe = await probePython(configured);
+    if (probe.ok) {
+      return { path: configured, error: "" };
+    }
+    return {
+      path: "",
+      error: `设置中的 Python 不可用：${configured}（${probe.detail || "无法执行"}）`,
+    };
   }
+
   const exe = Services.appinfo.OS === "WINNT" ? "python.exe" : "python3";
   const candidates: string[] = [];
   const pathVar = safeEnv("PATH");
   for (const dir of pathVar.split(Services.appinfo.OS === "WINNT" ? ";" : ":")) {
-    if (dir.trim()) {
-      candidates.push(PathUtils.join(dir.trim(), exe));
+    const trimmed = dir.trim();
+    // The Microsoft Store alias is not a real interpreter.
+    if (trimmed && !/WindowsApps/i.test(trimmed)) {
+      candidates.push(PathUtils.join(trimmed, exe));
     }
   }
   const known = [
@@ -315,16 +411,13 @@ async function findPython(prefs: { get(key: string, fallback: unknown): unknown 
     safeEnv("USERPROFILE") && PathUtils.join(safeEnv("USERPROFILE"), "miniconda3", exe),
     safeEnv("USERPROFILE") && PathUtils.join(safeEnv("USERPROFILE"), "anaconda3", exe),
     "C:\\ProgramData\\miniconda3\\python.exe",
+    "C:\\Python313\\python.exe",
     "C:\\Python312\\python.exe",
     "C:\\Python311\\python.exe",
     "C:\\Python310\\python.exe",
   ].filter(Boolean) as string[];
   candidates.push(...known);
-  for (const candidate of candidates) {
-    if (candidate.endsWith(".exe") && (await pathExists(candidate))) {
-      return candidate;
-    }
-  }
+
   // Directory scan of Python installs (LOCALAPPDATA\Programs\Python\Python3xx).
   const pythonRoot = safeEnv("LOCALAPPDATA")
     ? PathUtils.join(safeEnv("LOCALAPPDATA"), "Programs", "Python")
@@ -333,16 +426,37 @@ async function findPython(prefs: { get(key: string, fallback: unknown): unknown 
     try {
       const children = await IOUtils.getChildren(pythonRoot);
       for (const child of children.reverse()) {
-        const candidate = PathUtils.join(child, "python.exe");
-        if (await pathExists(candidate)) {
-          return candidate;
-        }
+        candidates.push(PathUtils.join(child, "python.exe"));
       }
     } catch {
       // Ignore listing failures.
     }
   }
-  return null;
+
+  const reasons: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate) || !candidate.endsWith(".exe")) {
+      continue;
+    }
+    seen.add(candidate);
+    if (!(await pathExists(candidate))) {
+      continue;
+    }
+    const probe = await probePython(candidate);
+    if (probe.ok) {
+      return { path: candidate, error: "" };
+    }
+    reasons.push(`${candidate}（${probe.detail || "无法执行"}）`);
+  }
+  const detail = reasons.slice(0, 3).join("；");
+  return {
+    path: "",
+    error:
+      "未找到可用的 Python 3.10+。请安装 Python 并执行 `pip install -e service`，" +
+      "或在 Zotero 设置 extensions.paperloom.pythonPath 中填写 python.exe 的绝对路径。" +
+      (detail ? ` 已尝试：${detail}` : ""),
+  };
 }
 
 function safeEnv(name: string): string {

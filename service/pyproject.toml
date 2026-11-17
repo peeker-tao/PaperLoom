@@ -29,8 +29,12 @@ include = ["paperloom_service*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+# Print a traceback for every thread when a test hangs, so a stall shows which
+# call is blocking instead of silently freezing the run.
+faulthandler_timeout = 60
 
 [tool.ruff]
 line-length = 100
