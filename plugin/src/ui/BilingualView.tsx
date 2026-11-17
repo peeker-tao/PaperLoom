@@ -113,15 +113,7 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         {pageSegments.map((segment) => (
           <div
             key={segment.id}
-            className={`pl-seg${active === segment.id ? " active" : ""}`}
-            style={{
-              display: "grid",
-              gridTemplateColumns: dual ? "1fr 1fr" : "1fr",
-              gap: 20,
-              padding: "8px 18px",
-              borderBottom: "1px solid #f0eee7",
-              borderRadius: 0,
-            }}
+            className={`pl-seg${active === segment.id ? " active" : ""} pl-seg-grid${dual ? "" : " single"}`}
             onClick={() => setActive(segment.id)}
           >
             {state.mode !== "translated" ? (

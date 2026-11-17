@@ -72,6 +72,7 @@ export interface UIState {
   notes: NoteSummary[];
   alignmentNote: string;
   model: string;
+  models: { id: string; label: string }[];
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -104,6 +105,7 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     notes: [],
     alignmentNote: "",
     model: "",
+    models: [],
   };
 }
 
@@ -183,9 +185,11 @@ export class ReaderController {
       const segments = (await this.host.service.client.getSegments(document.id)).segments;
       const terms = (await this.host.service.client.getGlossary(document.id)).terms;
       let chatModel = "";
+      let models: { id: string; label: string }[] = [];
       try {
         const settings = await this.host.service.client.getSettings();
         chatModel = settings.settings.chat_model;
+        models = settings.models || [];
       } catch (error) {
         debug("settings unavailable", errorText(error));
       }
@@ -196,11 +200,13 @@ export class ReaderController {
         ready: true,
         loading: false,
         model: chatModel,
+        models,
         alignmentNote: document.alignmentNote,
       });
       this.applyBodyStyles();
       await this.restoreReadingState();
       await this.restoreConversation();
+      await this.restoreAnalysis();
       await this.refreshNotes();
       await this.attachLatestJob();
       this.watchPageChanges();
@@ -222,6 +228,7 @@ export class ReaderController {
           mode: (state.mode as ReadMode) || "dual",
           sidebarWidth: state.sidebar_width || this.state.sidebarWidth,
           sidebarOpen: state.sidebar_open !== 0,
+          selection: (state as any).selection || null,
         });
         this.applyBodyStyles();
         if (state.page && state.page > 1) {
@@ -258,6 +265,28 @@ export class ReaderController {
       this.set({ conversationId: conversation.id, messages: mapped });
     } catch (error) {
       debug("conversation restore failed", errorText(error));
+    }
+  }
+
+  private async restoreAnalysis(): Promise<void> {
+    if (!this.state.document) {
+      return;
+    }
+    try {
+      const { analyses } = await this.host.service.client.listAnalyses(this.state.document.id, 1);
+      const latest = analyses[0];
+      if (latest) {
+        this.set({
+          analysis: {
+            kind: latest.kind,
+            text: latest.result,
+            status: latest.result ? "done" : "idle",
+            model: latest.model,
+          },
+        });
+      }
+    } catch (error) {
+      debug("analysis restore failed", errorText(error));
     }
   }
 
@@ -335,6 +364,11 @@ export class ReaderController {
 
   setSelection(selection: Selection | null): void {
     this.set({ selection });
+    this.scheduleSaveReading({ selection });
+  }
+
+  setModel(model: string): void {
+    this.set({ model });
   }
 
   setComposerDraft(text: string): void {
@@ -450,6 +484,7 @@ export class ReaderController {
           conversationId: this.state.conversationId,
           scope,
           selection,
+          image: selection?.kind === "figure" ? selection.image : undefined,
           messages: [...history, { role: "user", content: trimmed }],
         },
         abort.signal,
@@ -548,6 +583,48 @@ export class ReaderController {
   }
 
   // ---------------------------------------------------------------- notes
+  async saveConversationNote(): Promise<void> {
+    const attachment = this.attachment;
+    const document = this.state.document;
+    if (!attachment || !document) {
+      return;
+    }
+    const usable = this.state.messages.filter((message) => message.status === "done" && message.content.trim());
+    if (!usable.length) {
+      this.notice("当前没有可保存的对话");
+      return;
+    }
+    const lines = usable
+      .map((message) => (message.role === "user" ? `**问：** ${message.content}` : message.content))
+      .join("\n\n");
+    const citations = usable.flatMap((message) => message.citations || []);
+    const dedupe = `${document.id}:conv:${this.state.conversationId || "local"}`;
+    try {
+      const { updated } = await saveNote(
+        {
+          dedupeKey: dedupe,
+          docTitle: document.title,
+          attachment,
+          page: this.state.page,
+          selection: this.state.selection,
+          question: usable.find((message) => message.role === "user")?.content,
+          answer: lines,
+          citations,
+          segments: this.state.segments,
+          model: this.state.model,
+          kind: "对话",
+        },
+        attachment.parentItemID || attachment.attachmentItemID,
+        attachment.libraryID,
+        this.noteIndex,
+      );
+      this.notice(updated ? "已更新对话笔记" : "已保存整段对话到 Zotero 笔记");
+      await this.refreshNotes();
+    } catch (error) {
+      this.set({ error: `保存笔记失败：${errorText(error)}` });
+    }
+  }
+
   async saveSelectionNote(selection: Selection): Promise<void> {
     const attachment = this.attachment;
     const document = this.state.document;
@@ -662,6 +739,26 @@ export class ReaderController {
     }
   }
 
+  /** Ask for a page range (e.g. "1-3,5") and translate only those pages. */
+  async startTranslationWithPrompt(): Promise<void> {
+    let input: string | null = null;
+    try {
+      const win = Zotero.getMainWindow();
+      input = win.prompt("输入页码范围（例如 1-3,5；留空表示全文）", "");
+    } catch {
+      input = null;
+    }
+    if (input === null) {
+      return;
+    }
+    const pages = parsePageRanges(input);
+    if (pages === null) {
+      this.set({ error: "页码范围格式无效，请输入如 1-3,5" });
+      return;
+    }
+    await this.startTranslation(pages.length ? pages : undefined);
+  }
+
   private async followJob(jobId: string): Promise<void> {
     this.jobAbort?.abort();
     const abort = new AbortController();
@@ -696,6 +793,7 @@ export class ReaderController {
               `翻译完成：${data.translated ?? 0} 段` + (data.warnings?.length ? `（${data.warnings.length} 条提示）` : ""),
             );
             await this.reloadSegments();
+            await this.importArtifacts(jobId, data.artifacts);
           }
         }
       }
@@ -746,6 +844,62 @@ export class ReaderController {
     });
   }
 
+  /**
+   * Import BabelDOC PDF output into Zotero only after verifying it is a real
+   * PDF. Existing attachments with the same title are left untouched.
+   */
+  async importArtifacts(jobId?: string, artifacts?: { kind: string }[]): Promise<void> {
+    const attachment = this.attachment;
+    const document = this.state.document;
+    const id = jobId || this.state.job?.id;
+    if (!attachment || !document || !id) {
+      return;
+    }
+    const kinds = (artifacts || this.state.job?.artifacts || [])
+      .map((artifact) => artifact.kind)
+      .filter((kind) => kind === "dual" || kind === "mono");
+    for (const kind of kinds) {
+      try {
+        const buffer = await this.client.downloadArtifact(id, kind);
+        const head = new TextDecoder().decode(new Uint8Array(buffer.slice(0, 5)));
+        if (head !== "%PDF-") {
+          debug("artifact is not a pdf", kind);
+          continue;
+        }
+        const title = kind === "dual" ? "PaperLoom 双语版" : "PaperLoom 中文版";
+        const parentID = attachment.parentItemID;
+        if (parentID) {
+          const parent = Zotero.Items.get(parentID);
+          const childIDs = await parent.getAttachments();
+          const exists = childIDs.some((childID: number) => {
+            const child = Zotero.Items.get(childID);
+            return child && child.getField("title") === title;
+          });
+          if (exists) {
+            continue;
+          }
+        }
+        const dir = PathUtils.join(PathUtils.tempDir, "paperloom");
+        if (!(await IOUtils.exists(dir))) {
+          await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+        }
+        const path = PathUtils.join(dir, `${document.id}-${kind}.pdf`);
+        await IOUtils.write(path, new Uint8Array(buffer));
+        const imported = await Zotero.Attachments.importFromFile({
+          file: path,
+          parentItemID: parentID || undefined,
+          libraryID: attachment.libraryID,
+        });
+        imported.setField("title", title);
+        await imported.saveTx();
+        this.notice(`已创建 Zotero 附件：${title}`);
+      } catch (error) {
+        debug("artifact import failed", errorText(error));
+        this.notice(`导入翻译 PDF 失败：${errorText(error)}`);
+      }
+    }
+  }
+
   private async reloadSegments(): Promise<void> {
     const document = this.state.document;
     if (!document) {
@@ -759,12 +913,12 @@ export class ReaderController {
   }
 
   // ---------------------------------------------------------------- analysis
-  async analyze(kind: string, focus = ""): Promise<void> {
+  async analyze(kind: string, focus = "", durationMinutes = 10): Promise<void> {
     const document = this.state.document;
     if (!document) {
       return;
     }
-    await this.runAnalysis(kind, focus, [document.id]);
+    await this.runAnalysis(kind, focus, [document.id], durationMinutes);
   }
 
   /** Compare the current paper with the items selected in the Zotero main window. */
@@ -812,7 +966,12 @@ export class ReaderController {
     await this.runAnalysis("compare", "", Array.from(documentIds));
   }
 
-  private async runAnalysis(kind: string, focus: string, documentIds: string[]): Promise<void> {
+  private async runAnalysis(
+    kind: string,
+    focus: string,
+    documentIds: string[],
+    durationMinutes = 10,
+  ): Promise<void> {
     if (this.state.analysis?.status === "streaming") {
       this.analysisAbort?.abort();
     }
@@ -828,6 +987,7 @@ export class ReaderController {
         kind,
         documentIds,
         selection: this.state.scope === "selection" ? this.state.selection : null,
+        durationMinutes,
         focus,
       };
       for await (const event of this.host.service.client.analysis(body, abort.signal)) {
@@ -1010,4 +1170,27 @@ function hash(text: string): string {
     value = (value * 31 + text.charCodeAt(index)) | 0;
   }
   return Math.abs(value).toString(36);
+}
+
+function parsePageRanges(input: string): number[] | null {
+  const text = input.trim();
+  if (!text) {
+    return [];
+  }
+  const pages = new Set<number>();
+  for (const part of text.split(/[,，\s]+/).filter(Boolean)) {
+    const match = /^(\d+)(?:\s*[-~]\s*(\d+))?$/.exec(part);
+    if (!match) {
+      return null;
+    }
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : start;
+    if (start < 1 || end < start || end > 5000) {
+      return null;
+    }
+    for (let page = start; page <= end; page += 1) {
+      pages.add(page);
+    }
+  }
+  return Array.from(pages).sort((a, b) => a - b);
 }

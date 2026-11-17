@@ -56,6 +56,9 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(default=None, alias="conversationId")
     scope: Literal["selection", "section", "paper"] = "selection"
     selection: Selection | None = None
+    image: str | None = Field(
+        default=None, description="data:image/... base64 Data URL for figure questions"
+    )
     model: str | None = None
     context_chars: int | None = Field(default=None, alias="contextChars")
     max_output_tokens: int | None = Field(default=None, alias="maxOutputTokens")
@@ -119,6 +122,7 @@ class ReadingStatePatch(BaseModel):
     mode: Literal["original", "translated", "dual"] | None = None
     sidebar_width: int | None = Field(default=None, alias="sidebarWidth")
     sidebar_open: bool | None = Field(default=None, alias="sidebarOpen")
+    selection: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
 

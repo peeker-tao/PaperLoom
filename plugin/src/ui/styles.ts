@@ -189,5 +189,17 @@ export const SHADOW_CSS = `
 .pl-seg__text { font-size: 13.5px; }
 .pl-seg--original .pl-seg__text { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 14px; }
 .pl-seg-note { font-size: 11px; color: var(--pl-warn); }
+.pl-seg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  padding: 8px 18px;
+  border-bottom: 1px solid #f0eee7;
+}
+.pl-seg-grid.single { grid-template-columns: 1fr; }
+@media (max-width: 900px) {
+  .pl-seg-grid { grid-template-columns: 1fr; gap: 8px; }
+  .pl-sidebar { width: min(var(--pl-width, 380px), 100vw); }
+}
 .pl-bilingual__empty { padding: 40px; text-align: center; color: var(--pl-muted); }
 `;

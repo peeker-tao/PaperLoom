@@ -209,6 +209,17 @@ export class ServiceClient {
     return this.stream("/v1/analysis", body, signal);
   }
 
+  async downloadArtifact(jobId: string, kind: string): Promise<ArrayBuffer> {
+    const { baseUrl } = this.require();
+    const response = await fetch(`${baseUrl}/v1/jobs/${jobId}/artifacts/${kind}`, {
+      headers: { "X-PaperLoom-Token": this.require().token },
+    });
+    if (!response.ok) {
+      throw await this.toError(response);
+    }
+    return response.arrayBuffer();
+  }
+
   getGlossary(documentId: string) {
     return this.request<{ terms: import("../types").Term[] }>(
       `/v1/glossary?documentId=${encodeURIComponent(documentId)}`,
@@ -259,6 +270,12 @@ export class ServiceClient {
 
   getMessages(conversationId: string) {
     return this.request<{ messages: any[] }>(`/v1/conversations/${conversationId}/messages`);
+  }
+
+  listAnalyses(documentId: string, limit = 5) {
+    return this.request<{ analyses: any[] }>(
+      `/v1/analyses?documentId=${encodeURIComponent(documentId)}&limit=${limit}`,
+    );
   }
 
   search(documentId: string, query: string, limit = 8) {

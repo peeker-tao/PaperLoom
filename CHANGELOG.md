@@ -6,6 +6,25 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-17
+
+### Added
+
+- Figure/formula annotation questions can send the captured image to
+  `deepseek-flash` (vision) as a Data URL; falls back to captions and nearby
+  text with an explicit note when Zotero exposes no image data.
+- Translation artifacts (BabelDOC mono/dual PDF) are verified (`%PDF-` header)
+  and imported as Zotero child attachments; duplicates are skipped.
+- Per-conversation model selector, token/cost display, glossary injection into
+  Q&A prompts, page-range translation input, and "save whole conversation" notes.
+- Reading state now persists the current selection, and the last analysis is
+  restored when reopening a paper.
+
+### Changed
+
+- Service version and `/v1/status` report `llm=live|fake` for honest demo mode.
+- Narrow reader windows collapse the bilingual view to a single column.
+
 ## [0.1.0] - 2026-11-17
 
 ### Added

@@ -272,9 +272,10 @@ function onAnnotationContextMenu(event: any): void {
       label: isImage ? "用 PaperLoom 解释此图/表" : "用 PaperLoom 解释此公式",
       onCommand: () => {
         controller.toggleSidebar(true);
-        const kindNote = isImage
-          ? "（图像内容未直接发送；以下基于选中区域附近的正文与图注）"
-          : "";
+        const hasImage = Boolean(selection.image);
+        const kindNote = hasImage
+          ? "（已附带该区域的截图，请结合图像内容说明）"
+          : "（未获取到截图数据；以下基于选中区域附近的正文与图注）";
         controller.setSelection(selection);
         controller.setScope("selection");
         controller.setTab("chat");
@@ -319,12 +320,19 @@ function resolveAnnotation(reader: any, id: string): any | null {
 function selectionFromAnnotation(reader: any, annotation: any, kind: Selection["kind"]): Selection {
   const pageIndex = Number(annotation?.position?.pageIndex);
   const page = Number.isFinite(pageIndex) ? pageIndex + 1 : currentPage(reader);
+  const rawImage = annotation?.image;
+  const image = rawImage
+    ? String(rawImage).startsWith("data:")
+      ? String(rawImage)
+      : `data:image/png;base64,${rawImage}`
+    : undefined;
   return {
-    text: String(annotation.text || annotation.comment || "").trim(),
+    text: String(annotation?.text || annotation?.comment || "").trim(),
     page,
-    pageLabel: annotation.pageLabel || String(page),
-    rects: annotation.position?.rects || [],
+    pageLabel: annotation?.pageLabel || String(page),
+    rects: annotation?.position?.rects || [],
     kind,
+    image: kind === "figure" ? image : undefined,
   };
 }
 

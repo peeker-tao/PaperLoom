@@ -8,6 +8,8 @@ export interface Selection {
   pageLabel?: string;
   rects?: number[][];
   kind?: "text" | "formula" | "figure";
+  /** data:image/... base64 Data URL, only for figure annotations */
+  image?: string;
 }
 
 export interface DocumentMeta {

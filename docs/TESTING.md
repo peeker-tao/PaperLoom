@@ -7,7 +7,7 @@ Python **3.14.6**（本地）· Node 24.19 / npm 11.17 · DeepSeek Key：**未�
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 32 passed in 1.92s
+# 36 passed
 
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
@@ -25,8 +25,10 @@ node esbuild.config.mjs                          # content/plugin.js 223 KB, con
 | 取消/重试/中断恢复语义 | ✅ |
 | SSE 问答：delta、引用校验、消息持久化 | ✅ |
 | 六种分析模板（card/experiment/novelty/limitations/compare/outline） | ✅ |
-| 术语 CRUD、阅读状态、FTS5 检索 | ✅ |
+| 术语 CRUD、阅读状态（含选区）、FTS5 检索 | ✅ |
+| 按页翻译、分析记录恢复 | ✅ |
 | 上下文范围（选区/章节/整篇）与未知引用剔除 | ✅ |
+| 图表图片 Data URL 校验与透传 | ✅（假 LLM 不消费图片） |
 | 加密存储不回显明文密钥 | ✅ |
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
@@ -54,7 +56,10 @@ node esbuild.config.mjs                          # content/plugin.js 223 KB, con
 ## 已知限制
 
 - 段落对齐为文本块级；双栏、跨页、公式密集页可能合并过度，界面会显示实际对齐级别。
+- 图表解释：如果 Zotero 在图像注释中提供 `image` 数据，会以 Data URL 发送给
+  `deepseek-flash`（支持视觉）；若未提供，则退回图注与邻近正文，并在提问中明确标注。
+  真实视觉调用尚未验证（无 Key）。
+- BabelDOC 产物的 Zotero 附件导入：只有在产物通过 `%PDF-` 头校验后才创建附件；
+  同名附件存在时跳过。未安装 BabelDOC 时该路径不会触发。
 - 扫描件在翻译前即被拦截（`scanned_pdf`），需要用户先 OCR。
-- 图表解释目前基于图注与邻近正文；图片像素不会直接发送（DeepSeek Flash 支持视觉，
-  可在后续版本开启 image 上传）。
 - 模型返回的用量缺失时标记为估算；价格表可通过 `%APPDATA%\PaperLoom\pricing.json` 更新。

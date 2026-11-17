@@ -132,6 +132,14 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
               <button
                 type="button"
                 className="pl-btn pl-btn--ghost"
+                title="指定页码范围"
+                onClick={() => void controller.startTranslationWithPrompt()}
+              >
+                页码…
+              </button>
+              <button
+                type="button"
+                className="pl-btn pl-btn--ghost"
                 title="翻译全文"
                 onClick={() => void controller.startTranslation()}
               >
@@ -142,6 +150,16 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           {state.job && (state.job.state === "failed" || state.job.state === "interrupted") ? (
             <button type="button" className="pl-btn pl-btn--ghost" onClick={() => void controller.retryTranslation()}>
               重试
+            </button>
+          ) : null}
+          {state.job?.artifacts?.some((artifact) => artifact.kind === "dual" || artifact.kind === "mono") ? (
+            <button
+              type="button"
+              className="pl-btn pl-btn--ghost"
+              title="把排版保留 PDF 导入为 Zotero 附件"
+              onClick={() => void controller.importArtifacts()}
+            >
+              导入PDF
             </button>
           ) : null}
         </div>

@@ -30,7 +30,7 @@ export function AnalysisPanel(props: { controller: ReaderController; state: UISt
               if (kind.id === "compare") {
                 void controller.compareSelected();
               } else {
-                void controller.analyze(kind.id, focus);
+                void controller.analyze(kind.id, focus, minutes);
               }
             }}
           >
@@ -93,7 +93,7 @@ export function AnalysisPanel(props: { controller: ReaderController; state: UISt
             <button
               type="button"
               className="pl-btn pl-btn--ghost"
-              onClick={() => void controller.analyze(analysis.kind, focus)}
+              onClick={() => void controller.analyze(analysis.kind, focus, minutes)}
             >
               重新生成
             </button>

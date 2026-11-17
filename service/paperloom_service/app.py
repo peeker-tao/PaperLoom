@@ -22,6 +22,7 @@ from .config import (
     Settings,
     api_key_status,
     clear_api_key,
+    estimate_cost,
     load_api_key,
     load_pricing,
     load_settings,
@@ -31,7 +32,7 @@ from .config import (
 from .context import SYSTEM_GUARD, build_context, validate_citations
 from .db import Database, now
 from .deepseek import DeepSeekClient, DeepSeekError
-from .glossary import extract_terms
+from .glossary import extract_terms, glossary_block
 from .jobs import JobManager
 from .models import (
     AnalysisRequest,
@@ -562,8 +563,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         context_block = f"<document>\n{ctx['text']}\n</document>"
         if ctx.get("note"):
             context_block += f"\n（定位说明：{ctx['note']}）"
+        terms = state.db.list_terms(req.document_id)
+        glossary = glossary_block(terms)
         system = (
-            CHAT_SYSTEM + f"\n\n当前上下文范围：{req.scope}。" + "\n\n" + context_block
+            CHAT_SYSTEM
+            + (f"\n\n{glossary}" if glossary else "")
+            + f"\n\n当前上下文范围：{req.scope}。"
+            + "\n\n"
+            + context_block
         )
         messages = [{"role": "system", "content": system}]
         for item in req.messages[-12:]:
@@ -577,6 +584,25 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
 
         model = req.model or settings.chat_model
         max_tokens = req.max_output_tokens or settings.max_output_tokens
+        if req.image:
+            if not req.image.startswith("data:image/") or len(req.image) > 8_000_000:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "image_invalid",
+                        "message": "图片必须是 data:image/* 的 Data URL，且不超过 8MB",
+                    },
+                )
+            user_indexes = [i for i, m in enumerate(messages) if m["role"] == "user"]
+            if user_indexes:
+                index = user_indexes[-1]
+                messages[index] = {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": str(messages[index]["content"])},
+                        {"type": "image_url", "image_url": {"url": req.image}},
+                    ],
+                }
         client = state.client()
 
         async def event_stream():
@@ -626,6 +652,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "completionTokens": 0,
                 "estimated": True,
             }
+            cost = estimate_cost(
+                model,
+                int(final_usage.get("promptTokens", 0)),
+                int(final_usage.get("completionTokens", 0)),
+                load_pricing(cfg),
+            )
+            if cost is not None:
+                final_usage["costUsd"] = cost
             if not error:
                 state.db.add_message(
                     {
@@ -728,6 +762,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "completionTokens": 0,
                 "estimated": True,
             }
+            cost = estimate_cost(
+                model,
+                int(final_usage.get("promptTokens", 0)),
+                int(final_usage.get("completionTokens", 0)),
+                load_pricing(cfg),
+            )
+            if cost is not None:
+                final_usage["costUsd"] = cost
             if cleaned and not error:
                 state.db.save_analysis(
                     {
@@ -867,6 +909,11 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.get("/v1/conversations")
     async def list_conversations(documentId: str):
         return {"conversations": state.db.list_conversations(documentId)}
+
+    @app.get("/v1/analyses")
+    async def list_analyses(documentId: str, limit: int = 10):
+        state.doc_or_404(documentId)
+        return {"analyses": state.db.list_analyses(documentId, limit=max(1, min(limit, 50)))}
 
     @app.get("/v1/conversations/{conversation_id}/messages")
     async def conversation_messages(conversation_id: str, limit: int = 200):

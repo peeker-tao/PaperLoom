@@ -138,6 +138,7 @@ MIGRATIONS: list[str] = [
         text TEXT NOT NULL
     );
     """,
+    """ALTER TABLE reading_state ADD COLUMN selection TEXT;""",
 ]
 
 
@@ -536,7 +537,15 @@ class Database:
     def get_reading_state(self, doc_id: str) -> dict | None:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM reading_state WHERE document_id=?", (doc_id,)).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            data = dict(row)
+            if data.get("selection"):
+                try:
+                    data["selection"] = json.loads(data["selection"])
+                except json.JSONDecodeError:
+                    data["selection"] = None
+            return data
 
     def save_reading_state(self, doc_id: str, **fields: Any) -> dict:
         current = self.get_reading_state(doc_id) or {
@@ -544,21 +553,25 @@ class Database:
             "mode": "dual",
             "sidebar_width": 380,
             "sidebar_open": 1,
+            "selection": None,
         }
         current.update({k: v for k, v in fields.items() if v is not None})
+        selection = current.get("selection")
         with self.connect() as conn:
             conn.execute(
-                """INSERT INTO reading_state(document_id, page, mode, sidebar_width, sidebar_open, updated_at)
-                   VALUES (?,?,?,?,?,?)
+                """INSERT INTO reading_state(
+                       document_id, page, mode, sidebar_width, sidebar_open, selection, updated_at)
+                   VALUES (?,?,?,?,?,?,?)
                    ON CONFLICT(document_id) DO UPDATE SET page=excluded.page, mode=excluded.mode,
                     sidebar_width=excluded.sidebar_width, sidebar_open=excluded.sidebar_open,
-                    updated_at=excluded.updated_at""",
+                    selection=excluded.selection, updated_at=excluded.updated_at""",
                 (
                     doc_id,
                     int(current["page"]),
                     current["mode"],
                     int(current["sidebar_width"]),
                     1 if current["sidebar_open"] else 0,
+                    json.dumps(selection, ensure_ascii=False) if selection else None,
                     now(),
                 ),
             )
@@ -579,6 +592,23 @@ class Database:
                     now(),
                 ),
             )
+
+    def get_analysis(self, analysis_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM analyses WHERE id=?", (analysis_id,)).fetchone()
+            return _analysis_row(row) if row else None
+
+    def list_analyses(self, doc_id: str, limit: int = 10) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM analyses ORDER BY created_at DESC").fetchall()
+        result = []
+        for row in rows:
+            item = _analysis_row(row)
+            if doc_id in item["documentIds"]:
+                result.append(item)
+            if len(result) >= limit:
+                break
+        return result
 
     def get_cached_translation(self, key: str) -> str | None:
         with self.connect() as conn:
@@ -604,6 +634,14 @@ def _job_row(row: sqlite3.Row) -> dict:
     job["updatedAt"] = job.pop("updated_at")
     job["documentId"] = job.pop("document_id")
     return job
+
+
+def _analysis_row(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["documentIds"] = json.loads(data.get("document_ids") or "[]")
+    data["input"] = json.loads(data.get("input") or "{}")
+    data["createdAt"] = data.pop("created_at")
+    return data
 
 
 def _fts5_available(conn: sqlite3.Connection) -> bool:

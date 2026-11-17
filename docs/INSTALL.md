@@ -87,9 +87,11 @@ BabelDOC / PDFMathTranslate-next 采用 **AGPL-3.0**，本仓库不捆绑、不�
 需要“保留公式/图表版式的双语 PDF”时自行安装：
 
 ```powershell
-uv tool install --python 3.12 BabelDOC
+uv tool install --python 3.12 "BabelDOC==0.7.1"
 babeldoc --help
 ```
+
+建议锁定版本（开发时参考的最新版为 0.7.1）；升级前先确认 PaperLoom 的适配测试。
 
 安装后 PaperLoom 会在翻译任务结束时以独立进程调用它，产物作为额外的
 Zotero 附件候选；不安装只影响版式 PDF，不影响到段落级双语阅读。

@@ -30,6 +30,10 @@
         "conversationId": { "type": "string" },
         "scope": { "type": "string", "enum": ["selection", "section", "paper"] },
         "selection": { "$ref": "#/definitions/Selection" },
+        "image": {
+          "type": "string",
+          "description": "data:image/* base64 Data URL (max 8MB) for figure/formula questions"
+        },
         "model": { "type": "string" },
         "maxOutputTokens": { "type": "integer", "minimum": 64, "maximum": 384000 },
         "messages": {

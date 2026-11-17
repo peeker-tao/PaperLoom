@@ -14,9 +14,19 @@ export function NotesPanel(props: { controller: ReaderController; state: UIState
     <div className="pl-scroll">
       <div className="pl-row pl-row--between" style={{ marginBottom: 8 }}>
         <span className="pl-small pl-muted">本篇论文的 PaperLoom 笔记（{state.notes.length}）</span>
-        <button type="button" className="pl-btn pl-btn--ghost" onClick={() => void controller.refreshNotes()}>
-          刷新
-        </button>
+        <span className="pl-row">
+          <button
+            type="button"
+            className="pl-btn"
+            disabled={!state.messages.length}
+            onClick={() => void controller.saveConversationNote()}
+          >
+            保存整段对话
+          </button>
+          <button type="button" className="pl-btn pl-btn--ghost" onClick={() => void controller.refreshNotes()}>
+            刷新
+          </button>
+        </span>
       </div>
       {!state.notes.length ? (
         <Empty text="还没有笔记。回答下方的“保存笔记”，或选中文字后点击“保存笔记”即可写入 Zotero 子笔记。" />

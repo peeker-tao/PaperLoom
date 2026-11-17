@@ -192,6 +192,41 @@ async def test_chat_requires_parsed_document(client, tmp_path):
     assert response.status_code == 404
 
 
+async def test_chat_rejects_invalid_image(client, pdf_path):
+    data = await register(client, pdf_path)
+    response = await client.post(
+        "/v1/chat",
+        json={
+            "documentId": data["document"]["id"],
+            "messages": [{"role": "user", "content": "看图"}],
+            "image": "not-a-data-url",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "image_invalid"
+
+
+async def test_chat_accepts_image_data_url(client, pdf_path):
+    import base64
+
+    data = await register(client, pdf_path)
+    image = "data:image/png;base64," + base64.b64encode(b"fake-png-bytes").decode()
+    response = await client.post(
+        "/v1/chat",
+        json={
+            "documentId": data["document"]["id"],
+            "scope": "selection",
+            "selection": {"text": "Figure 2: architecture", "page": 1, "kind": "figure"},
+            "image": image,
+            "messages": [{"role": "user", "content": "解释这个图"}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    events = parse_sse(response.text)
+    assert events[-1][0] == "done"
+    assert events[-1][1]["status"] == "done"
+
+
 async def test_analysis_stream(client, pdf_path):
     data = await register(client, pdf_path)
     response = await client.post(
@@ -253,15 +288,51 @@ async def test_reading_state_roundtrip(client, pdf_path):
     data = await register(client, pdf_path)
     doc_id = data["document"]["id"]
     response = await client.put(
-        f"/v1/reading/{doc_id}", json={"page": 3, "mode": "dual", "sidebarWidth": 420}
+        f"/v1/reading/{doc_id}",
+        json={
+            "page": 3,
+            "mode": "dual",
+            "sidebarWidth": 420,
+            "selection": {"text": "sparse attention", "page": 2},
+        },
     )
     assert response.status_code == 200
     state = response.json()["state"]
     assert state["page"] == 3
     assert state["sidebar_width"] == 420
+    assert state["selection"]["text"] == "sparse attention"
 
     fetched = (await client.get(f"/v1/reading/{doc_id}")).json()["state"]
     assert fetched["mode"] == "dual"
+    assert fetched["selection"]["page"] == 2
+
+
+async def test_analyses_are_listed(client, pdf_path):
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+    response = await client.post(
+        "/v1/analysis", json={"kind": "card", "documentIds": [doc_id]}
+    )
+    assert response.status_code == 200
+    listed = await client.get("/v1/analyses", params={"documentId": doc_id})
+    assert listed.status_code == 200
+    analyses = listed.json()["analyses"]
+    assert analyses
+    assert analyses[0]["kind"] == "card"
+    assert analyses[0]["result"]
+
+
+async def test_translate_specific_pages_only(client, pdf_path):
+    data = await register(client, pdf_path)
+    doc_id = data["document"]["id"]
+    job_id = (
+        await client.post("/v1/jobs", json={"documentId": doc_id, "pages": [1]})
+    ).json()["job"]["id"]
+    job = await wait_job(client, job_id)
+    assert job["state"] == "succeeded"
+    segments = (await client.get(f"/v1/documents/{doc_id}/segments")).json()["segments"]
+    assert any(s.get("translation") for s in segments if s["page"] == 1)
+    assert not any(s.get("translation") for s in segments if s["page"] > 1)
 
 
 async def test_search_finds_segment(client, pdf_path):

@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 import type { ReaderController, UIState } from "../reader/controller";
+import type { Usage } from "../types";
 import { Empty, MarkdownView, Spinner } from "./common";
+
+function usageLabel(usage: Usage): string {
+  const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
+  const cost = typeof usage.costUsd === "number" ? ` · $${usage.costUsd.toFixed(4)}` : "";
+  return `${usage.estimated ? "≈" : ""}${tokens} tokens${cost}`;
+}
 
 export function ChatPanel(props: { controller: ReaderController; state: UIState }): JSX.Element {
   const { controller, state } = props;
@@ -123,6 +130,7 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
                 {message.citations?.length ? (
                   <span className="pl-small pl-muted">{message.citations.length} 处原文依据</span>
                 ) : null}
+                {message.usage ? <span className="pl-small pl-muted">{usageLabel(message.usage)}</span> : null}
               </div>
             ) : null}
           </div>
@@ -168,7 +176,25 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
               <option value="section">当前章节</option>
               <option value="paper">整篇论文</option>
             </select>
-            <span className="pl-small pl-muted">{state.model || "默认模型"}</span>
+            {state.models.length ? (
+              <select
+                className="pl-select"
+                value={state.model}
+                title="问答模型"
+                onChange={(event) => controller.setModel(event.target.value)}
+              >
+                {state.models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.id}
+                  </option>
+                ))}
+                {state.model && !state.models.some((model) => model.id === state.model) ? (
+                  <option value={state.model}>{state.model}</option>
+                ) : null}
+              </select>
+            ) : (
+              <span className="pl-small pl-muted">{state.model || "默认模型"}</span>
+            )}
           </div>
           <div className="pl-row">
             {state.streaming ? (
