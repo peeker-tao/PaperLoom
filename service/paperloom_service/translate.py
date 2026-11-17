@@ -31,6 +31,16 @@ TRANSLATE_SYSTEM = (
 MAX_BATCH_SEGMENTS = 6
 MAX_BATCH_CHARS = 2800
 MIN_TRANSLATE_CHARS = 2
+# Kinds that must never be sent to the translator: citations, author/affiliation
+# blocks (kept verbatim) and layout noise (single chars, bare numbers).
+SKIP_KINDS = {"reference", "meta", "noise"}
+
+
+def _has_prose(text: str) -> bool:
+    """Reject fragments that carry no translatable prose (e.g. '2', 'r', 'M')."""
+    stripped = text.strip()
+    letters = sum(1 for c in stripped if c.isalpha())
+    return letters >= 4 and letters / max(1, len(stripped)) >= 0.35
 
 
 class TranslationCancelled(Exception):
@@ -241,8 +251,9 @@ async def translate_document(
     selected = [
         seg
         for seg in segments
-        if seg.get("kind") not in {"reference"}
+        if seg.get("kind") not in SKIP_KINDS
         and len(seg["text"].strip()) >= MIN_TRANSLATE_CHARS
+        and _has_prose(seg["text"])
         and (not pages or seg["page"] in pages)
     ]
     if not selected:

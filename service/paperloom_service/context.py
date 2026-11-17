@@ -9,7 +9,10 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-CITATION_RE = re.compile(r"\[\[seg:([A-Za-z0-9_\-:]+)\]\]")
+# Models frequently echo the marker format they saw in the context, so accept
+# any case ("[[SEG:p1-s0]]") but always emit the canonical lowercase form.
+CITATION_RE = re.compile(r"\[\[(?:seg|SEG):([A-Za-z0-9_\-:]+)\]\]", re.IGNORECASE)
+MIN_SECTION_CHARS = 1200
 HEADING_KINDS = {"title", "heading"}
 
 SYSTEM_GUARD = (
@@ -61,6 +64,18 @@ def _section_bounds(segments: list[dict], index: int) -> tuple[int, int]:
     end = index + 1
     while end < len(segments) and segments[end].get("kind") not in HEADING_KINDS:
         end += 1
+    # A heading with no body (common when the next line is another heading, or on
+    # a page break) gives the model nothing to work with: continue into following
+    # sections until there is enough text. If a body exists, respect the heading
+    # boundary instead of bleeding into the next section.
+    has_body = any(
+        seg.get("kind") not in HEADING_KINDS for seg in segments[start + 1 : end]
+    )
+    if not has_body:
+        chars = sum(len(seg["text"]) for seg in segments[start:end])
+        while chars < MIN_SECTION_CHARS and end < len(segments):
+            chars += len(segments[end]["text"])
+            end += 1
     return start, min(end, len(segments))
 
 

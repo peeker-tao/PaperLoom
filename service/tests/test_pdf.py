@@ -51,3 +51,27 @@ def test_segment_ids_are_unique_per_document(tmp_path):
     ids = [seg["id"] for seg in doc["segments"]]
     assert len(ids) == len(set(ids))
     assert ids[0].startswith("p1-s")
+
+
+def test_noise_and_author_blocks_are_classified():
+    """Regression from a real paper: '2'/'r' fragments and author lines."""
+    from paperloom_service.pdf.extract import _is_author_block, _is_noise
+
+    assert _is_noise("2")
+    assert _is_noise("r")
+    assert _is_noise("0 2")
+    assert not _is_noise("We propose a relay diffusion model for text-to-image generation.")
+
+    assert _is_author_block("Wendi Zheng1∗‡, Jiayan Teng1∗‡, Zhuoyi Yang1‡")
+    assert _is_author_block("1 Tsinghua University, Beijing, China")
+    assert _is_author_block("Correspondence: someone@example.edu")
+    assert not _is_author_block(
+        "We propose a relay diffusion model that generates images in two stages."
+    )
+
+
+def test_coverage_never_exceeds_one(tmp_path):
+    from paperloom_service.pdf.extract import parse_pdf
+
+    doc = parse_pdf(paper_pdf(tmp_path / "p.pdf", pages=2))
+    assert 0 < doc["coverage"] <= 1.0

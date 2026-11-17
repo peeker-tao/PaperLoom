@@ -28,7 +28,7 @@ function inline(text: string, options: RenderOptions): string {
   out = out.replace(/`([^`]+)`/g, (_m, code: string) => `<code>${code}</code>`);
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-  out = out.replace(/\[\[seg:([A-Za-z0-9_\-:]+)\]\]/g, (_match, segmentId: string) => {
+  out = out.replace(/\[\[(?:seg|SEG):([A-Za-z0-9_\-:]+)\]\]/g, (_match, segmentId: string) => {
     const target = options.resolve?.(segmentId) || null;
     const label = target?.page ? `p.${target.page}` : "引用";
     if (options.citationsAsLinks && target?.href) {
@@ -150,5 +150,5 @@ export function renderMarkdown(markdown: string, options: RenderOptions = {}): s
 }
 
 export function streamableText(markdown: string): string {
-  return markdown.replace(/\[\[seg:[^\]]+\]\]/g, "").trimEnd();
+  return markdown.replace(/\[\[(?:seg|SEG):[^\]]+\]\]/g, "").trimEnd();
 }

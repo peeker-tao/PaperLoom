@@ -28,6 +28,38 @@ CAPTION_RE = re.compile(
 SECTION_RE = re.compile(r"^(\d+(\.\d+)*|[IVX]+\.)\s+\S")
 REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
 PAGE_NUMBER_RE = re.compile(r"^\s*(page\s*)?\d{1,4}\s*$", re.IGNORECASE)
+# Author/affiliation blocks: superscript markers, emails, institution words.
+AUTHOR_MARKERS = re.compile(r"[\u2217\u2020\u2021\u00a7\u00b6*\u2020]|\b\d+\s*(?:,|and)\b")
+AFFILIATION_RE = re.compile(
+    r"(universit|institut|laborator|department|school of|college|academy|inc\.|ltd\.|correspond|@[a-z0-9.-]+\.[a-z]{2,})",
+    re.IGNORECASE,
+)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+
+
+def _is_noise(text: str) -> bool:
+    """True for fragments with no translatable prose (single chars, numbers)."""
+    stripped = text.strip()
+    if len(stripped) < 8:
+        return True
+    letters = sum(1 for c in stripped if c.isalpha())
+    return letters < 4 or letters / max(1, len(stripped)) < 0.35
+
+
+def _is_author_block(text: str) -> bool:
+    """Author lists and affiliations should be kept verbatim, not translated."""
+    stripped = text.strip()
+    if len(stripped) > 400:
+        return False
+    if EMAIL_RE.search(stripped) or AFFILIATION_RE.search(stripped):
+        return True
+    # "Wendi Zheng1∗‡, Jiayan Teng1∗‡, ..." — mostly names + superscripts.
+    tokens = [t for t in stripped.split() if t]
+    if len(tokens) < 3:
+        return False
+    marker_hits = len(AUTHOR_MARKERS.findall(stripped))
+    capitalized = sum(1 for t in tokens if t[:1].isupper())
+    return marker_hits >= 2 and capitalized / len(tokens) > 0.5
 
 
 @dataclass
@@ -210,6 +242,10 @@ def _join(a: str, b: str) -> str:
 def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
     text = seg["text"]
     size = seg.get("size", body_size)
+    if _is_noise(text):
+        return "noise"
+    if _is_author_block(text):
+        return "meta"
     if (
         page == 1
         and seg["ordinal"] <= 1
@@ -337,7 +373,7 @@ def parse_pdf(path: Path, title: str = "") -> dict:
         if sum(len(ln.text) for ln in by_page[p]) >= MIN_CHARS_PER_PAGE
     )
     scanned = pages_with_text < max(1, int(page_count * 0.5))
-    coverage = (segment_chars / extracted_chars) if extracted_chars else 0.0
+    coverage = min(1.0, segment_chars / extracted_chars) if extracted_chars else 0.0
 
     alignment = "segment"
     note = "段落级对齐（按文本块合并）"
