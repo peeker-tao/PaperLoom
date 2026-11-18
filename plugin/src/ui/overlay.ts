@@ -244,3 +244,51 @@ export function fitPage(
   const width = Math.max(40, columnWidth);
   return { width, height: (image.pageHeight / image.pageWidth) * width };
 }
+
+export interface PageRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Map a PDF-user-space bbox onto the rendered page bitmap, in bitmap pixels.
+ *
+ * Figures are drawn by cropping this rectangle out of the full page image, so
+ * the result must be in the bitmap's own coordinate system (which already
+ * includes the device-pixel-ratio multiplier). Rotated pages are refused: the
+ * pdf.js viewport applies a matrix that a plain flip cannot reproduce and the
+ * crop would come from the wrong place.
+ */
+export function pageRect(
+  bbox: [number, number, number, number] | number[],
+  image: Pick<RenderedPage, "width" | "height" | "pageWidth" | "pageHeight" | "rotation">,
+  bitmapWidth?: number,
+): PageRect | null {
+  if (!image.pageWidth || !image.pageHeight || !image.width) {
+    return null;
+  }
+  if ((((Number(image.rotation) || 0) % 360) + 360) % 360 !== 0) {
+    return null;
+  }
+  if (!Array.isArray(bbox) || bbox.length < 4) {
+    return null;
+  }
+  const [x0, y0, x1, y1] = bbox.map((value) => Number(value) || 0);
+  if (!(x1 > x0) || !(y1 > y0)) {
+    return null;
+  }
+  const ratio = image.width / image.pageWidth;
+  // `image.width` is in CSS px; the PNG may be larger on a HiDPI screen.
+  const factor = bitmapWidth && bitmapWidth > 0 ? bitmapWidth / image.width : 1;
+  const scale = ratio * factor;
+  const left = Math.max(0, x0 * scale);
+  const top = Math.max(0, (image.pageHeight - y1) * scale);
+  const width = Math.min((x1 - x0) * scale, (bitmapWidth || image.width) - left);
+  const height = Math.min((y1 - y0) * scale, image.height * factor - top);
+  if (width < 8 || height < 8) {
+    return null;
+  }
+  return { left, top, width, height };
+}

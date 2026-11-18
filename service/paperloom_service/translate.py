@@ -42,8 +42,9 @@ MAX_BATCH_CHARS = 2800
 # invented text (table cells, figure labels, stray layout text).
 MIN_TRANSLATE_CHARS = 12
 # Kinds that must never be sent to the translator: citations, author/affiliation
-# blocks (kept verbatim), layout noise, display equations and table cells.
-SKIP_KINDS = {"reference", "meta", "noise", "formula", "table"}
+# blocks (kept verbatim), layout noise, display equations, table cells and the
+# picture regions extracted for the reading view.
+SKIP_KINDS = {"reference", "meta", "noise", "formula", "table", "figure"}
 
 
 def _has_prose(text: str) -> bool:
@@ -62,6 +63,10 @@ def is_translatable(segment: dict) -> bool:
     if segment.get("kind") in SKIP_KINDS:
         return False
     text = (segment.get("text") or "").strip()
+    # A heading is prose the reader needs ("3 Method", "5 Related Work"); the
+    # length floor exists to drop fragments, and headings are not fragments.
+    if segment.get("kind") in {"title", "heading"}:
+        return _has_prose(text)
     return len(text) >= MIN_TRANSLATE_CHARS and _has_prose(text)
 
 

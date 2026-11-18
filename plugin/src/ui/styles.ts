@@ -26,7 +26,9 @@ export const SHADOW_CSS = `
   top: 0; right: 0; bottom: 0;
   width: var(--pl-width, 380px);
   min-width: 300px;
-  max-width: 620px;
+  /* Matches SIDEBAR_MAX_WIDTH in the controller: a reading column should be
+     able to use the screen instead of stopping at a fixed strip. */
+  max-width: min(960px, 100vw);
   display: flex;
   flex-direction: column;
   background: var(--pl-bg);
@@ -242,9 +244,10 @@ export const SHADOW_CSS = `
 }
 .pl-md__body {
   flex: 1; min-height: 0; overflow-y: auto;
-  padding: 18px 22px 60px;
-  /* Long English lines are hard to read; cap the measure. */
-  max-width: 78ch; margin: 0 auto; width: 100%;
+  /* Fill the sidebar: a centred narrow column left visible dead space on both
+     sides and made long English paragraphs wrap more than the width allowed. */
+  padding: 16px 18px 60px;
+  width: 100%;
   font-size: 14px; line-height: 1.62; color: #16191c;
 }
 .pl-md__page {
@@ -259,6 +262,26 @@ export const SHADOW_CSS = `
 .pl-md__heading--3 { font-size: 16px; font-weight: 650; }
 .pl-md__heading--4, .pl-md__heading--5, .pl-md__heading--6 { font-size: 14.5px; font-weight: 650; }
 .pl-md__para { margin: 0 0 14px; padding: 4px 8px; border-radius: 5px; cursor: default; }
+.pl-md__figure {
+  margin: 6px 0 16px; padding: 8px; border-radius: 6px;
+  background: #fff; border: 1px solid var(--pl-border);
+}
+.pl-md__figure-img {
+  display: block; width: 100%; height: auto; cursor: zoom-in;
+  border-radius: 3px; background: #fff;
+}
+.pl-md__figure-label {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px; color: var(--pl-muted); font-size: 11.5px;
+  letter-spacing: 0.3px;
+}
+.pl-md__figure-loading,
+.pl-md__figure-fallback {
+  display: block; width: 100%; padding: 24px 10px;
+  border: 1px dashed var(--pl-border); border-radius: 4px;
+  background: #faf9f5; color: var(--pl-muted); font-size: 12px; text-align: center;
+}
+.pl-md__figure-fallback { cursor: pointer; }
 .pl-md__para:hover, .pl-md__heading:hover { background: #f4f6f3; }
 .pl-md__para.active, .pl-md__heading.active {
   background: var(--pl-accent-weak); box-shadow: inset 2px 0 0 var(--pl-accent);

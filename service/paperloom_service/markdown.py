@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import re
 
-# Kinds that never belong in the reading text.
-SKIP_KINDS = {"noise", "meta", "formula", "table"}
+# Kinds that never belong in the reading text. ``figure`` is a picture region:
+# the plugin draws it, and a text file has nowhere to put an image.
+SKIP_KINDS = {"noise", "meta", "formula", "table", "figure"}
 # Kinds that are prose but optional (bibliographies are long and rarely read).
 OPTIONAL_KINDS = {"reference"}
 
@@ -102,11 +103,13 @@ def render_markdown(
     title = paper_title or (document.get("title") or "").strip()
     if front_matter and title:
         blocks.append(f"# {_escape_inline(title)}")
-        translated = sum(1 for s in segments if s.get("translation"))
-        translatable = sum(
-            1 for s in segments if s.get("kind") not in SKIP_KINDS | OPTIONAL_KINDS
-        )
-        meta = f"共 {document.get('pages') or 0} 页 · {translated}/{translatable} 段已译"
+        # Count translations only over the segments actually offered for
+        # translation, otherwise a bibliography translation makes "97/96".
+        counted = [
+            s for s in segments if s.get("kind") not in SKIP_KINDS | OPTIONAL_KINDS
+        ]
+        translated = sum(1 for s in counted if s.get("translation"))
+        meta = f"共 {document.get('pages') or 0} 页 · {translated}/{len(counted)} 段已译"
         blocks.append(f"> {meta}")
 
     current_page = None

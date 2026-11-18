@@ -29,6 +29,7 @@ const {
   fitPage,
   fitFontSize,
   wrapEstimated,
+  pageRect,
   MIN_OVERLAY_WIDTH,
   MIN_OVERLAY_HEIGHT,
 } = await import(pathToFileURL(bundle).href);
@@ -156,6 +157,32 @@ test("fitPage keeps the aspect ratio", () => {
   const tall = fitPage({ ...page, pageWidth: 400, pageHeight: 560 }, 200);
   assert.equal(tall.width, 200);
   assert.equal(tall.height, 280);
+});
+
+// --- pageRect: where a figure is cut out of the rendered page ---------------
+
+test("pageRect maps a PDF box onto the bitmap", () => {
+  // Caption box at the bottom-left of the sheet, page rendered at 1:1.
+  const rect = pageRect([72, 100, 300, 160], page);
+  assert.deepEqual(rect, { left: 72, top: 792 - 160, width: 228, height: 60 });
+});
+
+test("pageRect scales with the rendered page size", () => {
+  const half = pageRect([100, 100, 200, 200], { ...page, width: 306 });
+  assert.deepEqual(half, { left: 50, top: (792 - 200) / 2, width: 50, height: 50 });
+});
+
+test("pageRect accounts for a HiDPI bitmap", () => {
+  // 306 CSS px wide, but the PNG is 612 device px: everything doubles.
+  const rect = pageRect([100, 100, 200, 200], { ...page, width: 306 }, 612);
+  assert.deepEqual(rect, { left: 100, top: 792 - 200, width: 100, height: 100 });
+});
+
+test("pageRect refuses rotated, inverted and empty boxes", () => {
+  assert.equal(pageRect([0, 0, 100, 100], { ...page, rotation: 90 }), null);
+  assert.equal(pageRect([100, 100, 0, 0], page), null);
+  assert.equal(pageRect([0, 0, 2, 2], page), null);
+  assert.equal(pageRect([], page), null);
 });
 
 rmSync(outDir, { recursive: true, force: true });

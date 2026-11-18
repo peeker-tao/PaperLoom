@@ -6,6 +6,43 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-18
+
+### Added
+
+- **Figures and tables are shown in the reading view.** A paper about image
+  generation is unreadable without its pictures, and the Markdown view had
+  silently dropped them. The service now finds the area each caption refers to
+  (`figure` segments, `PARSER_VERSION` 6) and the plugin cuts that region out of
+  the rendered page, so the reader sees the real picture — exact colours, axes,
+  sub-labels — between the caption and the surrounding text.
+- Region detection absorbs a table cell by cell instead of stopping at the first
+  row, prefers the tighter of the two candidate sides (stacked tables used to
+  steal each other's body), and refuses anything ambiguous: no text inside the
+  region, no crop thinner than 55pt, none covering more than 80% of the page.
+
+### Changed
+
+- The reading view fills the sidebar. A centred 78-character column left a dead
+  strip on both sides; long paragraphs also wrapped more than the width allowed.
+- `SIDEBAR_MAX_WIDTH` is 960px instead of 620px, in the CSS and in the drag
+  clamp, so a wide screen can actually be used for reading.
+
+### Fixed
+
+- Prose that merely mentions a table ("Table 1 shows results of …") was typed as
+  a caption and printed at caption size. A caption now needs a separator right
+  after the label.
+- `97/96 段已译`: the two numbers were counted over different sets (references
+  keep translations). Both are now counted over the same segments, and pictures
+  are excluded.
+
+### Verified
+
+- 157 service tests (up from 150, including 7 for figure regions) and 17 plugin
+  tests (including `pageRect` mapping). On the 21-page sample paper 10 of 13
+  captions get a crop; every one was rendered to PNG and inspected.
+
 ## [0.1.4] - 2026-11-18
 
 ### Changed

@@ -8,20 +8,20 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 150 passed in ~10s
+# 157 passed in ~10s
 
 .\.venv\Scripts\python.exe -m ruff check service scripts
 # All checks passed!
 
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
-node test/overlay.test.mjs                      # 13 passed
+node test/overlay.test.mjs                      # 17 passed
 node esbuild.config.mjs                         # content/plugin.js ~253 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（150 项）
+### 服务端覆盖（157 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
@@ -29,6 +29,7 @@ node esbuild.config.mjs                         # content/plugin.js ~253 KB
 | `test_pdf.py` | 段落合并、双栏阅读顺序、扫描件识别、`meta`/`noise` 分类、coverage 上限、**旋转水印过滤**、**连字符接续（`im-`+`plementing` vs `text-`+`to-image`）**、缩进首行分新段、公式/表格/参考文献分类、**摘要前的机构行不当标题**、`PARSER_VERSION` 记录 | ✅ 15 项 |
 | `test_markdown.py` | 英文在前中文在后、Markdown 标题层级、非正文（公式/表格/噪声/机构行）排除、参考文献可选、页面标记为注释、只原文/只译文、未译段落仍显示原文、换行展平、统计与文件名清理、**论文自身标题胜过 Zotero 文件名** | ✅ 11 项 |
 | `test_reparse.py` | 重解析按原文保留已付费译文、可显式丢弃 | ✅ 2 项 |
+| `test_figures.py` | 图/表区域检测：相邻文本块定界、过窄间隙拒绝、区域内正文拒绝、**表格逐格吸收**、**同页两张表各取自己那一张**、``Table 1 shows …`` 不当题注、图片排在题注之前 | ✅ 7 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
 | `test_translation_config.py` | 生成配置身份、过期判定、无出处历史行按需重译 | ✅ |
 | `test_urls.py` | Base URL 归一化、`/v1` 只出现一次、粘贴完整端点时的纠正 | ✅ |
@@ -36,12 +37,13 @@ node esbuild.config.mjs                         # content/plugin.js ~253 KB
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
 | `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
 
-### 插件侧（13 项）
+### 插件侧（17 项）
 
 `plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
 覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
 旋转页拒绝、越界框拒绝、**整页 bbox 拒绝**（跨页合并 bug 的回归）、空译文跳过、
-**拉丁词不断行**、**行首禁则标点**、字号收缩到不可行时放弃、`fitPage` 宽高比。
+**拉丁词不断行**、**行首禁则标点**、字号收缩到不可行时放弃、`fitPage` 宽高比，
+以及 `pageRect` 的图片裁切映射（1:1、缩放、HiDPI、旋转/逆序/空框拒绝）。
 
 `service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
 同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。
@@ -126,7 +128,7 @@ DST: 摘要。近期文本到图像生成系统的进展在很大程度上由扩
 ```powershell
 .\.venv\Scripts\python.exe scripts\export_markdown.py --document-id <id> --out cogview3.md
 # wrote cogview3.md (37674 chars, 50871 bytes)
-#   english words: 4030  chinese chars: 6045  segments: 371
+#   english words: 4030  chinese chars: 6045  segments: 381
 ```
 
 标题层级全部为真实章节标题（18 个）：
@@ -154,7 +156,33 @@ ocess that gradually adds Gaussian noise to corrupt real data x0 as follows:
 坏真实数据 x0，如下所示：
 ```
 
-页边界用 `<!-- pN -->` 注释标记（渲染时不显示），参考文献默认不导出。
+页边界用 `<!-- pN -->` 注释标记（渲染时不显示），参考文献默认不导出；
+图片/表格不是文本，Markdown 里不出现（阅读视图里则以原页裁切图显示）。
+
+## 图与表的裁切（阅读视图内联显示）
+
+同一篇论文（21 页，页面 413.9 × 615.1 pt）自动检到 **10 个图/表区域**，
+全部与题注配对，裁切结果逐张目视核对：
+
+| 题注 | 页码 | 区域 (pt) | 裁切尺寸 | 结果 |
+| --- | --- | --- | --- | --- |
+| Figure 1 | 2 | 398.8 – 582.7 | 691 × 368 | ✅ 完整首图宫格 |
+| Figure 2 | 5 | 177.9 – 412.7 | 691 × 470 | ✅ |
+| Figure 3 | 6 | 363.5 – 569.2 | 691 × 412 | ✅ 流水线左右两栏均完整 |
+| Table 1 | 10 | 222.0 – 314.6 | 691 × 186 | ✅ 表头与分组线完整 |
+| Table 2 | 10 | 67.2 – 179.2 | 691 × 224 | ✅ 与 Table 1 不重叠 |
+| Figure 4 | 11 | 341.9 – 472.6 | 691 × 261 | ✅ |
+| Figure 5 | 11 | 152.8 – 311.0 | 691 × 316 | ✅ |
+| Table 3 | 12 | 89.6 – 218.9 | 691 × 259 | ✅ |
+| Figure 8 | 13 | 77.3 – 306.2 | 691 × 458 | ✅ |
+| Figure 9 | 14 | 261.3 – 449.7 | 702 × 377 | ✅ |
+
+未检出的 3 个题注（Fig. 6、Fig. 7、Algorithm 1）故意放弃：它们要么与正文
+块交叠、要么是同排子图的小题注，算不准就不裁——错误裁切比没有图更难发现。
+
+裁切使用与插件相同的坐标换算：`scripts` 侧的 pdfium 渲染 ↔ 插件侧
+`pageRect()`（`plugin/test/overlay.test.mjs` 覆盖 1:1、缩放、HiDPI、旋转页拒绝）。
+阅读视图在 Zotero 内用 pdf.js 渲染同一页，再按区域裁切，不需要额外依赖。
 
 ## 真实论文的叠层几何校验
 

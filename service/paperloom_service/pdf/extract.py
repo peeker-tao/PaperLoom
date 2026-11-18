@@ -17,6 +17,8 @@ from pathlib import Path
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LAParams, LTChar, LTTextContainer, LTTextLine
 
+from .figures import insert_figures
+
 log = logging.getLogger("paperloom.pdf")
 
 # Bump whenever segmentation output changes: documents parsed by an older
@@ -24,7 +26,11 @@ log = logging.getLogger("paperloom.pdf")
 # v3: cross-page continuation keeps a single-page bbox; rotated stamps filtered;
 #     references/equations/table cells classified.
 # v4: author affiliations above the abstract are no longer read as headings.
-PARSER_VERSION = 4
+# v5: the area next to a figure/table caption becomes a ``figure`` segment, so
+#     the reading view can show the real picture instead of dropping it.
+# v6: table bodies are absorbed cell by cell, and prose that merely mentions a
+#     table ("Table 1 shows ...") is no longer typed as a caption.
+PARSER_VERSION = 6
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
@@ -37,6 +43,11 @@ MATH_OPERATOR_RE = re.compile(r"[=∼∝∥▷◃⊤⊥⟨⟩→←↔∑∫√�
 CAPTION_RE = re.compile(
     r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE
 )
+# A real caption continues with punctuation right after the label ("Fig. 2: An
+# example"); running prose continues with a verb ("Table 1 shows the results",
+# "Figure 8 shows qualitative comparison"). Treating that prose as a caption
+# made the reading view print a whole paragraph at caption size.
+CAPTION_MARK_RE = re.compile(r"[.:|\u2013\u2014-]")
 SECTION_RE = re.compile(r"^\d+(\.\d+)*\s+\S")
 REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
 # Reference lists use many numbering styles; a single line rarely tells, but a
@@ -460,7 +471,7 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
         and len(text) < 400
     ):
         return "title"
-    if CAPTION_RE.match(text):
+    if _looks_like_caption(text):
         return "caption"
     if len(text) < 160 and size >= body_size * 1.08 and not text.rstrip().endswith("."):
         return "heading"
@@ -477,6 +488,20 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
     if page == 1 and re.match(r"^abstract\b", text, re.IGNORECASE):
         return "abstract"
     return "body"
+
+
+def _looks_like_caption(text: str) -> bool:
+    """True for "Fig. 2: An example", false for "Table 1 shows the results".
+
+    Both start with a figure/table label, but only the caption is followed by a
+    separator. Without this check a full paragraph that merely mentions a table
+    is typed as a caption and printed at caption size in the reading view.
+    """
+    match = CAPTION_RE.match(text.strip())
+    if not match:
+        return False
+    rest = text.strip()[match.end() :].lstrip()
+    return bool(rest) and bool(CAPTION_MARK_RE.match(rest))
 
 
 def _looks_like_section_heading(text: str) -> bool:
@@ -719,14 +744,25 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     _mark_layout_fragments(merged_segments)
     # "2 Zhipu AI" looks like a section number; it is an affiliation.
     _mark_affiliations_as_meta(merged_segments)
+    # A caption plus the empty space next to it is a picture; the reading view
+    # draws it from the page bitmap instead of pretending it does not exist.
+    merged_segments = insert_figures(merged_segments, sizes)
 
-    # Re-number ids sequentially so they remain stable and readable.
+    # Re-number ids sequentially per page: the injected figure segments need
+    # their own slot, and stable ids keep reading state and citations valid.
+    counters: dict[int, int] = {}
     for index, seg in enumerate(merged_segments):
-        seg["id"] = f"p{seg['page']}-s{seg['ordinal']}"
+        page = int(seg["page"])
+        ordinal = counters.get(page, 0)
+        counters[page] = ordinal + 1
+        seg["ordinal"] = ordinal
+        seg["id"] = f"p{page}-s{ordinal}"
         seg["index"] = index
 
     extracted_chars = sum(len(ln.text) for p in by_page for ln in by_page[p])
-    segment_chars = sum(len(seg["text"]) for seg in merged_segments)
+    segment_chars = sum(
+        len(seg["text"]) for seg in merged_segments if seg.get("kind") != "figure"
+    )
     pages_with_text = sum(
         1
         for p in by_page

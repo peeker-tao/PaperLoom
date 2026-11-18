@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Segment } from "../types";
+import { PageCrop } from "./PageCrop";
 
 const PROSE_KINDS = new Set(["body", "abstract", "caption"]);
 const HIDDEN_KINDS = new Set(["noise", "meta", "formula", "table"]);
@@ -39,10 +40,15 @@ export function MarkdownReading(props: {
   );
 
   const referenceCount = state.segments.filter((s) => s.kind === "reference").length;
-  const translated = state.segments.filter((s) => s.translation).length;
-  const translatable = state.segments.filter(
-    (s) => !HIDDEN_KINDS.has(s.kind) && s.kind !== "reference",
-  ).length;
+  // Count both numbers over the same set, and exclude references the way the
+  // server does — otherwise the panel reads "97/96 段已译". Pictures are not
+  // translatable either, so counting them would make the progress look worse
+  // than it is.
+  const countable = state.segments.filter(
+    (s) => !HIDDEN_KINDS.has(s.kind) && s.kind !== "reference" && s.kind !== "figure",
+  );
+  const translated = countable.filter((s) => s.translation).length;
+  const translatable = countable.length;
 
   let lastPage = 0;
   const rows: JSX.Element[] = [];
@@ -66,6 +72,7 @@ export function MarkdownReading(props: {
       <Paragraph
         key={segment.id}
         segment={segment}
+        controller={controller}
         mode={mode}
         active={active === segment.id}
         onPick={() => setActive(active === segment.id ? null : segment.id)}
@@ -123,16 +130,47 @@ export function MarkdownReading(props: {
 
 function Paragraph(props: {
   segment: Segment;
+  controller: ReaderController;
   mode: "original" | "translated" | "dual";
   active: boolean;
   onPick(): void;
   onJump(): void;
 }): JSX.Element {
-  const { segment, mode, active, onPick, onJump } = props;
+  const { segment, controller, mode, active, onPick, onJump } = props;
   const heading = segment.kind === "title" || segment.kind === "heading";
   const showOriginal = mode !== "translated";
   const showTranslation = mode !== "original";
   const hasTranslation = Boolean(segment.translation);
+
+  if (segment.kind === "figure") {
+    // The service marks the empty area next to a caption; the picture itself is
+    // cropped out of the rendered page, so figures stay visible in the
+    // reading view instead of silently disappearing.
+    return (
+      <figure className="pl-md__figure" onClick={onPick}>
+        <PageCrop
+          controller={controller}
+          page={segment.page}
+          bbox={segment.bbox}
+          alt={segment.text || "原文图片"}
+          onOpen={onJump}
+        />
+        <figcaption className="pl-md__figure-label">
+          {segment.text}
+          <button
+            type="button"
+            className="pl-btn pl-btn--ghost pl-small"
+            onClick={(event) => {
+              event.stopPropagation();
+              onJump();
+            }}
+          >
+            查看原页
+          </button>
+        </figcaption>
+      </figure>
+    );
+  }
 
   if (heading) {
     const level = headingLevel(segment);

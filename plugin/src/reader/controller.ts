@@ -30,6 +30,16 @@ export interface PluginHost {
   prefs: ReturnType<typeof createPrefs>;
 }
 
+/**
+ * Bounds for the sidebar width.
+ *
+ * The upper bound is generous on purpose: the reading view is a text column,
+ * and capping it at 620px left a wide screen with an unused strip the user
+ * could not fill. The drag grip and the CSS clamp use the same numbers.
+ */
+export const SIDEBAR_MIN_WIDTH = 300;
+export const SIDEBAR_MAX_WIDTH = 960;
+
 export interface AnalysisState {
   kind: string;
   text: string;
@@ -257,7 +267,7 @@ export class ReaderController {
           : "dual";
         const width = Number(state.sidebar_width);
         const sidebarWidth = Number.isFinite(width)
-          ? Math.max(300, Math.min(620, Math.round(width)))
+          ? Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)))
           : this.state.sidebarWidth;
         this.set({
           page,
@@ -381,7 +391,10 @@ export class ReaderController {
   }
 
   setSidebarWidth(width: number): void {
-    const clamped = Math.max(300, Math.min(620, Math.round(width)));
+    const clamped = Math.max(
+      SIDEBAR_MIN_WIDTH,
+      Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)),
+    );
     this.set({ sidebarWidth: clamped });
     this.applyBodyStyles();
     this.host.prefs.set("extensions.paperloom.sidebarWidth", clamped);

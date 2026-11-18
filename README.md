@@ -54,8 +54,8 @@ PaperLoom 在 Zotero 内完成「翻译 → 对照阅读 → 选中提问 → �
 
 ## 验证状态
 
-- 服务端：**150 项**自动化测试全部通过（假 LLM，无网络）；`ruff check` 通过。
-- 插件：TypeScript 严格模式、esbuild 构建通过；叠层几何有 13 项 Node 单元测试；
+- 服务端：**157 项**自动化测试全部通过（假 LLM，无网络）；`ruff check` 通过。
+- 插件：TypeScript 严格模式、esbuild 构建通过；叠层几何与图片裁切有 17 项 Node 单元测试；
   已在 **Zotero 10.0.8** 实际加载启动（`%APPDATA%\PaperLoom\plugin-startup.json`）。
 - 真实 DeepSeek 调用已验证：连接 680ms；单页翻译 `succeeded 27/27`（7.3s，
   1694 提示 / 820 完成 token，约 $0.0015）；流式问答引用标记通过校验；追问与
