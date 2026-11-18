@@ -21,6 +21,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "typecheck failed" }
     node test/overlay.test.mjs
     if ($LASTEXITCODE -ne 0) { throw "plugin unit tests failed" }
+    node test/jump.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw "plugin jump tests failed" }
     node esbuild.config.mjs
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
   }

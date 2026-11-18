@@ -139,6 +139,31 @@ to 2 of 86, and the median paragraph from 245 to 337 characters.
 A short line that ends a sentence is a legitimate paragraph end even if the next
 line is indented — the parser deliberately does not glue those together.
 
+## 「在 PDF 中查看」没反应
+
+0.2.2 前这是一个真实的 bug，不是环境问题。`jumpToPage` 先调用
+`reader.navigate()`——它只是给 reader iframe 发一条消息，**不会抛错**，于是函数在
+第一个分支就 `return true`，下面真正管用的 pdf.js 分支从来没被执行到。侧边栏记下了
+新页码、看起来成功，PDF 却没动。
+
+现在的顺序是：pdf.js `pdfViewer.currentPageNumber`（同步生效，与图片渲染用的是同一个
+viewer）→ `getPageView().div.scrollIntoView()` → 文档化的 `reader.navigate()`
+（会 await）。跳转是否真的发生会被检查，失败时侧边栏提示
+**「无法自动定位到第 N 页，请在 PDF 中手动翻页」**，不再静默。
+
+如果仍然失败，先在 **设置 → 自检** 里跑一遍，再打开插件日志：
+
+```powershell
+Get-Content "$env:APPDATA\PaperLoom\logs\plugin.log" -Tail 30
+# 关注 jumpToPage failed / figure image failed to load / figure render via service failed
+```
+
+## 图片位置是空白，既没有图也没有提示
+
+0.2.2 前 `<img>` 没有 `onError`：图片被 reader 的 CSP 拦掉（`blob:` URL）或响应被截断时，
+`failed` 仍是 `false`，于是既没有图片也没有「回到 PDF 查看」按钮，只剩一块空白。
+现在裁切图以 `data:` URL 传递（reader 一定允许），加载失败会退回可点击的按钮。
+
 ## 翻译报错「本地服务无响应」
 
 先看服务是否还活着：

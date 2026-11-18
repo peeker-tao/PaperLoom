@@ -973,10 +973,9 @@ def _join_broken_segments(segments: list[dict], vocab: set[str]) -> list[dict]:
                 # "…as follows:" / [equation] / "where K denotes …" — the colon
                 # introduces the equation, so the clause after it is the same
                 # paragraph even though a ":" looks like a sentence end.
-                open_after = (
-                    not candidate_tail.endswith(SENTENCE_END)
-                    or candidate_tail.endswith((":", "："))
-                )
+                open_after = not candidate_tail.endswith(
+                    SENTENCE_END
+                ) or candidate_tail.endswith((":", "："))
                 if gap in (0, 1) and (
                     broken_word
                     or (open_after and re.match(r"^[a-z]", seg["text"].lstrip()))

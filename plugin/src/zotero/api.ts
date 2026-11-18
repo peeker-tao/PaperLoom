@@ -86,28 +86,59 @@ export async function resolvePdfPath(item: any): Promise<string | null> {
   return null;
 }
 
-export function jumpToPage(reader: any, page: number): boolean {
+/**
+ * Scroll the reader to a page. Returns whether the scroll actually happened.
+ *
+ * Order matters, and it was wrong before: `reader.navigate()` only posts a
+ * message to the reader iframe, so calling it never throws — the old code
+ * returned `true` on the first attempt and the pdf.js path below it was
+ * unreachable. "在 PDF 中查看" therefore did nothing while the sidebar happily
+ * reported the new page.
+ */
+export async function jumpToPage(reader: any, page: number): Promise<boolean> {
   const index = Math.max(0, Math.floor(page) - 1);
-  const attempts: (() => void)[] = [
-    () => reader.navigate({ pageIndex: index }),
-    () => reader._navigate({ pageIndex: index }),
-    () => {
-      const app = reader._iframeWindow?.PDFViewerApplication;
-      if (app?.pdfViewer) {
-        app.pdfViewer.currentPageNumber = index + 1;
-      } else if (app) {
-        app.page = index + 1;
-      } else {
-        throw new Error("no pdf viewer");
+  const target = index + 1;
+
+  // 1. pdf.js inside the reader iframe: same object the page renderer uses, and
+  //    setting `currentPageNumber` scrolls synchronously.
+  const app = reader?._iframeWindow?.PDFViewerApplication;
+  const viewer = app?.pdfViewer;
+  if (viewer) {
+    try {
+      viewer.currentPageNumber = target;
+      if (viewer.currentPageNumber === target) {
+        return true;
       }
-    },
-    () => {
-      reader._internalReader?.navigate?.({ pageIndex: index });
-    },
+    } catch {
+      // Fall through: the viewer exists but the page is not laid out yet.
+    }
+    try {
+      const pageView = viewer.getPageView?.(index);
+      const target_ = pageView?.div || pageView?.canvas;
+      if (target_ && typeof target_.scrollIntoView === "function") {
+        target_.scrollIntoView({ block: "start" });
+        return true;
+      }
+    } catch {
+      // Fall through to the documented API.
+    }
+  }
+
+  // 2. The documented reader API. It returns before the scroll happens, so wait
+  //    for the promise rather than trusting the call itself.
+  const attempts: (() => unknown)[] = [
+    () => reader?.navigate?.({ pageIndex: index }),
+    () => reader?._internalReader?.navigate?.({ pageIndex: index }),
   ];
   for (const attempt of attempts) {
     try {
-      attempt();
+      const result = attempt();
+      if (!result) {
+        continue;
+      }
+      if (typeof (result as Promise<unknown>).then === "function") {
+        await (result as Promise<unknown>);
+      }
       return true;
     } catch {
       // Try the next strategy.

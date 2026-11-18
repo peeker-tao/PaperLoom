@@ -30,7 +30,6 @@ export function PageCrop(props: {
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
     setSrc(null);
     setFailed(false);
 
@@ -47,8 +46,12 @@ export function PageCrop(props: {
         if (cancelled) {
           return true;
         }
-        objectUrl = URL.createObjectURL(blob);
-        setSrc(objectUrl);
+        // A data URL rather than a blob: URL. The sidebar lives in Zotero's
+        // reader iframe, whose CSP decides what an <img> may load; a blob URL
+        // that gets blocked fails silently and leaves an empty box. data: is
+        // allowed everywhere the reader runs, and it survives the component
+        // unmounting (no revoke to get wrong).
+        setSrc(await toDataUrl(blob));
         return true;
       } catch (error) {
         debug("figure render via service failed", page, String(error));
@@ -110,9 +113,6 @@ export function PageCrop(props: {
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
     };
     // `key` covers page and bbox; the controller instance is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,9 +134,26 @@ export function PageCrop(props: {
       src={src}
       alt={alt}
       title={`${alt} · 点击定位到 PDF 原页`}
+      // Without this a rejected image (blocked by CSP, truncated response)
+      // showed an empty box: `failed` stayed false, so the user got neither the
+      // picture nor the "回到 PDF 查看" button.
+      onError={() => {
+        debug("figure image failed to load", page, bbox.join(","));
+        setFailed(true);
+      }}
       onClick={onOpen}
     />
   );
+}
+
+/** Read a blob as a data URL (`blob:` URLs are not reliably allowed in the reader). */
+function toDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
+    reader.readAsDataURL(blob);
+  });
 }
 
 /** Decode a data URL into an image, tolerating a decode failure. */

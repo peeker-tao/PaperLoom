@@ -24,13 +24,17 @@ from pathlib import Path
 SENTENCE_END = tuple(".!?:。！？；;")
 
 
-def request(base: str, path: str, token: str, *, method: str = "GET", body: dict | None = None):
+def request(
+    base: str, path: str, token: str, *, method: str = "GET", body: dict | None = None
+):
     data = None
     headers = {"X-PaperLoom-Token": token}
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(f"{base}{path}", data=data, headers=headers, method=method)
+    req = urllib.request.Request(
+        f"{base}{path}", data=data, headers=headers, method=method
+    )
     with urllib.request.urlopen(req, timeout=600) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -65,12 +69,16 @@ def main() -> int:
     args = parser.parse_args()
 
     base = f"http://127.0.0.1:{args.port}"
-    token = (Path.home() / "AppData" / "Roaming" / "PaperLoom" / "token").read_text(
-        encoding="utf-8"
-    ).strip()
+    token = (
+        (Path.home() / "AppData" / "Roaming" / "PaperLoom" / "token")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
 
     status = request(base, "/v1/status", token)
-    print(f"service {status['version']} llm={status.get('llm')} key={status['apiKey']['configured']}")
+    print(
+        f"service {status['version']} llm={status.get('llm')} key={status['apiKey']['configured']}"
+    )
     if status.get("llm") != "live":
         print("! service is in fake-LLM mode; set a real API key for meaningful output")
 
@@ -85,7 +93,9 @@ def main() -> int:
         }
         if args.register:
             body["force"] = True
-        registered = request(base, "/v1/documents/register", token, method="POST", body=body)
+        registered = request(
+            base, "/v1/documents/register", token, method="POST", body=body
+        )
         document_id = registered["document"]["id"]
         print(
             f"document {document_id} segments={registered['segmentCount']} "
@@ -117,7 +127,9 @@ def main() -> int:
             f"{progress.get('message', '')}",
             flush=True,
         )
-    print(f"final state={final['state']} usage={final.get('usage')} layout={(final.get('layout') or {}).get('state')}")
+    print(
+        f"final state={final['state']} usage={final.get('usage')} layout={(final.get('layout') or {}).get('state')}"
+    )
     if final.get("error"):
         print("error:", final["error"])
         return 1
@@ -132,7 +144,9 @@ def main() -> int:
     for seg in pairs[: args.limit]:
         src, dst = seg["text"], seg["translation"]
         print("=" * 78)
-        print(f"[{seg['id']}] p{seg['page']} kind={seg['kind']} src={len(src)} dst={len(dst)}")
+        print(
+            f"[{seg['id']}] p{seg['page']} kind={seg['kind']} src={len(src)} dst={len(dst)}"
+        )
         print("SRC:", src[:500])
         print("DST:", dst[:500])
         flags = []

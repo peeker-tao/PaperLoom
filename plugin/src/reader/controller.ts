@@ -311,7 +311,7 @@ export class ReaderController {
         });
         this.applyBodyStyles();
         if (page > 1) {
-          jumpToPage(this.reader, page);
+          void jumpToPage(this.reader, page);
         }
       }
     } catch (error) {
@@ -602,10 +602,28 @@ export class ReaderController {
     this.set({ glossaryOpen: open });
   }
 
+  /**
+   * Scroll the PDF to a page and record it as the reading position.
+   *
+   * The jump result is reported: it used to be discarded, so a reader that
+   * silently refused to scroll still looked successful — the sidebar showed the
+   * new page while the PDF stayed put, which reads as "按钮没反应".
+   */
   jumpTo(page: number): void {
-    jumpToPage(this.reader, page);
+    void this.jumpToAndReport(page);
+  }
+
+  private async jumpToAndReport(page: number): Promise<void> {
+    const moved = await jumpToPage(this.reader, page);
+    if (this.destroyed) {
+      return;
+    }
     this.set({ page });
     this.scheduleSaveReading({ page });
+    if (!moved) {
+      this.notice(`无法自动定位到第 ${page} 页，请在 PDF 中手动翻页`);
+      debug("jumpToPage failed", page);
+    }
   }
 
   jumpToSegment(segmentId: string): void {
@@ -617,11 +635,7 @@ export class ReaderController {
     if (this.state.mode === "original") {
       this.setMode("dual");
     }
-    if (segment.page !== this.state.page) {
-      this.jumpTo(segment.page);
-    } else {
-      jumpToPage(this.reader, segment.page);
-    }
+    void this.jumpToAndReport(segment.page);
     this.flashSegment(segment.id);
   }
 

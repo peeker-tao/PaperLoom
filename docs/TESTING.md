@@ -16,7 +16,8 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 17 passed
-node esbuild.config.mjs                         # content/plugin.js ~269 KB
+node test/jump.test.mjs                         # 5 passed
+node esbuild.config.mjs                         # content/plugin.js ~270 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
@@ -40,13 +41,18 @@ node esbuild.config.mjs                         # content/plugin.js ~269 KB
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
 | `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
 
-### 插件侧（17 项）
+### 插件侧（22 项）
 
 `plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
 覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
 旋转页拒绝、越界框拒绝、**整页 bbox 拒绝**（跨页合并 bug 的回归）、空译文跳过、
 **拉丁词不断行**、**行首禁则标点**、字号收缩到不可行时放弃、`fitPage` 宽高比，
 以及 `pageRect` 的图片裁切映射（1:1、缩放、HiDPI、旋转/逆序/空框拒绝）。
+
+`plugin/test/jump.test.mjs`（5 项）用假 reader 锁定 `jumpToPage` 的策略顺序：
+**pdf.js 可用时绝不调用 `reader.navigate`**（旧实现卡在这条分支上，导致「在 PDF 中查看」
+毫无反应）、1-based 页码换 0-based `pageIndex`、异步 `navigate` 会被 await、
+viewer 拒绝页码时退回 `scrollIntoView`、**没有任何可用 API 时返回失败而不是假装成功**。
 
 `service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
 同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。

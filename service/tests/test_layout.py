@@ -98,7 +98,9 @@ def test_short_last_line_ends_the_paragraph_at_the_column_break():
     ]
     segments = _merge_page(lines, 1, 10.0, set())
     texts = [s["text"] for s in segments]
-    assert "This ends here." in texts or any(t.endswith("This ends here.") for t in texts)
+    assert "This ends here." in texts or any(
+        t.endswith("This ends here.") for t in texts
+    )
     assert any(t.startswith("2. Related Work") for t in texts)
 
 
@@ -126,8 +128,14 @@ def test_cross_column_box_stays_inside_one_column():
 
 def test_hyphen_before_a_capital_never_becomes_a_space():
     """\"E-\" + \"RayZer\" is \"E-RayZer\"; \"E- RayZer\" is not a word."""
-    assert _join("we use E-", "RayZer as the baseline", set()) == "we use E-RayZer as the baseline"
-    assert _join("its predecessor E-", "RayZer [25]", set()) == "its predecessor E-RayZer [25]"
+    assert (
+        _join("we use E-", "RayZer as the baseline", set())
+        == "we use E-RayZer as the baseline"
+    )
+    assert (
+        _join("its predecessor E-", "RayZer [25]", set())
+        == "its predecessor E-RayZer [25]"
+    )
 
 
 def test_hyphenation_and_compounds_still_resolve_with_the_vocabulary():
@@ -141,7 +149,7 @@ def test_hyphenation_and_compounds_still_resolve_with_the_vocabulary():
 
 
 def test_a_paragraph_split_by_an_equation_is_rejoined():
-    """"… as self-supervision:" / [equation] / "where Percep denotes …".
+    """ "… as self-supervision:" / [equation] / "where Percep denotes …".
 
     The clause after a display equation explains that equation, so it belongs to
     the paragraph that introduced it. Sent as its own paragraph it starts with a
@@ -178,7 +186,7 @@ def test_a_paragraph_split_by_an_equation_is_rejoined():
 
 
 def test_a_run_in_label_does_not_split_its_sentence():
-    """"… results of E-RayZer" / "Datasets." / "trained on both …"."""
+    """ "… results of E-RayZer" / "Datasets." / "trained on both …"."""
     from paperloom_service.pdf.extract import _lift_inline_labels
 
     segments = [
@@ -221,4 +229,3 @@ def test_cid_glyph_runs_are_not_printed_as_paragraphs():
     assert _is_math_fragment("tgt )(cid:1).")
     assert _is_math_fragment(", Linear(Iref, Rplk")
     assert not _is_math_fragment("RayZer uses predicted cameras of target views.")
-

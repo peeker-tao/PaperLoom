@@ -6,6 +6,35 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-18
+
+### Fixed
+
+- **「在 PDF 中查看」点了没反应.** `jumpToPage` tried `reader.navigate()` first.
+  That call only posts a message to the reader iframe, so it never throws — the
+  function hit `return true` on the first attempt and the pdf.js branch
+  underneath it was unreachable. The sidebar then recorded the new page and
+  looked successful while the PDF had not moved. The order is now:
+  pdf.js `pdfViewer.currentPageNumber` (synchronous, and the same viewer the
+  page renderer uses) → `getPageView().div.scrollIntoView()` → the documented
+  `reader.navigate()`, awaited. `jumpToPage` returns whether the scroll actually
+  happened, so "无从定位" is reported instead of silently ignored.
+- **图片位置是空白，既没有图也没有提示.** `<img>` had no `onError`, so an image
+  the reader refused to load (blocked `blob:` URL under the reader iframe's CSP,
+  truncated response) left an empty box: `failed` stayed `false`, so the user got
+  neither the picture nor the 「回到 PDF 查看」button. Crops are now passed as
+  `data:` URLs, which the reader always allows, and a load failure falls back to
+  the visible button. The jump result is also surfaced in the sidebar notice.
+- `jumpToSegment` no longer double-jumps when the target page is already shown.
+
+### Tests
+
+- `plugin/test/jump.test.mjs` (5 cases) pins the strategy order: pdf.js is used
+  and `reader.navigate` is never reached when pdf.js works; a refused page falls
+  back to `scrollIntoView`; an async `navigate` is awaited; and a reader with no
+  usable API reports failure instead of pretending. Wired into
+  `npm run test:unit` and `scripts/check.ps1`.
+
 ## [0.2.1] - 2026-11-18
 
 ### Fixed

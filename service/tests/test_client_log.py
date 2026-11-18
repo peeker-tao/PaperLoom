@@ -21,7 +21,10 @@ async def test_client_log_is_written_to_the_data_directory(client, cfg):
 
     log_file = cfg.data_dir / "logs" / "plugin.log"
     assert log_file.exists()
-    assert log_file.read_text(encoding="utf-8").splitlines() == ["first line", "second line"]
+    assert log_file.read_text(encoding="utf-8").splitlines() == [
+        "first line",
+        "second line",
+    ]
 
 
 async def test_client_log_requires_the_instance_token(client, cfg):
@@ -47,9 +50,9 @@ async def test_requests_are_logged_so_a_missing_call_is_visible(client, caplog):
     nothing" gets distinguished from "the request never arrived"."""
     with caplog.at_level(logging.INFO, logger="paperloom.app"):
         await client.get("/v1/status")
-    assert any(
-        "GET /v1/status" in record.getMessage() for record in caplog.records
-    ), [record.getMessage() for record in caplog.records]
+    assert any("GET /v1/status" in record.getMessage() for record in caplog.records), [
+        record.getMessage() for record in caplog.records
+    ]
 
 
 async def test_rejected_token_is_logged(client, caplog):
