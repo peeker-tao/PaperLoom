@@ -238,6 +238,32 @@ export function isPdfReader(reader: any): boolean {
   }
 }
 
+/** Copy text to the system clipboard, across the Zotero/Firefox variants. */
+export function copyText(text: string): boolean {
+  const write = (fn: (() => void) | undefined): boolean => {
+    try {
+      fn?.();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // Zotero 7+ provides this helper and handles the document argument itself.
+  const internal = (Zotero as any)?.Utilities?.Internal?.copyTextToClipboard;
+  if (typeof internal === "function") {
+    if (write(() => internal.call(Zotero.Utilities.Internal, text))) {
+      return true;
+    }
+  }
+  const helper = (Services as any).clipboardHelper;
+  if (helper?.copyString) {
+    if (write(() => helper.copyString(text))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function openNote(noteID: number): void {
   try {
     const win = Zotero.getMainWindow();

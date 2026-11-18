@@ -19,6 +19,7 @@ PaperLoom is split into three parts that talk over loopback HTTP only.
 │    ├─ /v1/analysis    reading card / experiment / novelty / limitations / compare   │
 │    ├─ /v1/glossary    paper-local + global terms                                     │
 │    ├─ /v1/reading     reading state + conversation persistence                      │
+│    ├─ /v1/documents/{id}/markdown  bilingual Markdown (English, then Chinese)         │
 │    └─ /health         version + capability report                                   │
 │  SQLite (WAL) + FTS5   documents, segments, translations, jobs, messages, terms      │
 │  pdf/                  pdfminer.six extraction, paragraph merge, alignment           │
@@ -56,6 +57,24 @@ Every artifact is keyed by `(libraryID, itemKey, attachmentKey, fileHash)`.
 4. The UI shows the *measured* alignment level: `segment` (default) or `page`
    when a paragraph could not be merged reliably. BabelDOC output is a separate
    layout-preserving deliverable and is never used as the alignment source.
+
+## Output format: Markdown, not a layout copy
+
+The sidebar does not try to rebuild the PDF page. `markdown.py` turns the
+segment list into ordinary Markdown — one block per paragraph, English first,
+Chinese after, `##`/`###` derived from the section numbers — and every consumer
+(sidebar, clipboard, Zotero note, `scripts/export_markdown.py`) renders that
+same string. Reflowing text beats absolute positioning here: a sidebar is a
+different width from a two-column paper, and text placed into boxes sized for
+the original column shrinks until it is unreadable.
+
+The page-accurate overlay (`plugin/src/ui/overlay.ts`, `版式` toggle) still
+exists for figures and equations, where position carries meaning. It is a view
+over the same segments, not a second pipeline.
+
+Re-parsing is versioned (`PARSER_VERSION`). When it runs, translations are
+matched back by source text (`replace_segments(..., keep_translations=True)`),
+so improving segmentation does not invalidate work the user already paid for.
 
 ## Trust boundary
 

@@ -6,6 +6,56 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-18
+
+### Changed
+
+- **The sidebar now shows a reading view instead of a layout replica.** Every
+  paragraph is printed as the English original followed by the Chinese
+  translation, in normal document flow. Re-creating the PDF layout inside a
+  narrow sidebar was fragile (text had to be squeezed into boxes designed for a
+  different column width) and it is not how anyone reads. The page-accurate view
+  is still available behind the `版式` toggle.
+- Markdown is the single output format: the sidebar, `复制 Markdown` and
+  `存为笔记` all use the same server-side renderer, so what is exported is
+  exactly what was read.
+
+### Added
+
+- `paperloom_service/markdown.py` and `GET /v1/documents/{id}/markdown`:
+  renders a translated paper as Markdown — H1 is the paper's own title,
+  `##`/`###` come from section numbers, paragraphs are English / blank line /
+  Chinese, `<!-- pN -->` marks page boundaries, references are optional.
+- Sidebar: copy the Markdown to the clipboard, or save it as a Zotero note
+  attached to the item (saving again overwrites the same note instead of
+  piling up duplicates).
+- `scripts/export_markdown.py`: export a registered paper to a `.md` file from
+  the command line.
+- Translations survive re-parsing: when the parser version changes (or
+  `重新解析` is used) translations are matched back by their source text, so a
+  free segmentation improvement no longer destroys paid translations. The
+  response reports how many were kept (`keptTranslations`).
+
+### Fixed
+
+- Author affiliations above the abstract (`2 Zhipu AI`, `1 Tsinghua
+  University`) matched the section-number pattern and appeared as fake chapters.
+  Short segments before the abstract on page 1 are now `meta`.
+- The H1 was the Zotero attachment title (`Zheng 等 - 2024 - CogView3`)
+  followed by the real title. The paper's own title is used, once.
+- Figure captions and equation fragments that start with a number
+  (`1024 (bottom). All prompts …`, `0 + σtϵ, t, ctext)`) were headings. Section
+  headings now require a small section number followed by a capitalised word,
+  and bibliographic-looking text never qualifies.
+- Reference entries (`1. Achiam, J., …`) are classified as `reference` even
+  when they look like numbered headings.
+
+### Verified
+
+- 150 service tests (up from 136) and 13 plugin tests; a live job on a 21-page
+  paper: 99/99 segments, 37.7k characters of Markdown, 4 030 English words,
+  6 045 Chinese characters, 18 headings — all of them real section headings.
+
 ## [0.1.3] - 2026-11-17
 
 ### Fixed

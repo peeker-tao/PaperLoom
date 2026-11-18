@@ -187,6 +187,23 @@ def test_every_document_records_its_parser_version(tmp_path):
     assert doc["parser_version"] == PARSER_VERSION
 
 
+def test_affiliations_before_the_abstract_are_not_headings():
+    """Regression: '2 Zhipu AI' matched the section-number pattern and became an H2."""
+    from paperloom_service.pdf.extract import _mark_affiliations_as_meta
+
+    segments = [
+        {"page": 1, "kind": "title", "text": "CogView3: Finer and Faster"},
+        {"page": 1, "kind": "meta", "text": "Wendi Zheng1, Jiayan Teng1"},
+        {"page": 1, "kind": "heading", "text": "1 Tsinghua University"},
+        {"page": 1, "kind": "heading", "text": "2 Zhipu AI"},
+        {"page": 1, "kind": "abstract", "text": "Abstract. Recent advancements ..."},
+        {"page": 1, "kind": "heading", "text": "2 Background"},
+    ]
+    _mark_affiliations_as_meta(segments)
+    kinds = [seg["kind"] for seg in segments]
+    assert kinds == ["title", "meta", "meta", "meta", "abstract", "heading"]
+
+
 def test_cross_page_merge_keeps_a_single_page_bbox(tmp_path):
     """Regression: mixing the coordinates of two pages produced a page-size box.
 

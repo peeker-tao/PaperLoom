@@ -276,30 +276,56 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def replace_segments(self, doc_id: str, segments: Iterable[dict]) -> None:
+    def replace_segments(
+        self, doc_id: str, segments: Iterable[dict], keep_translations: bool = True
+    ) -> int:
+        """Replace the stored segments, keeping translations whose text is unchanged.
+
+        Re-parsing happens automatically whenever the parser version changes, and
+        it used to throw away every paid translation. Segment ids are derived from
+        page/ordinal, so they shift when segmentation improves; matching on the
+        source text survives that. Returns the number of carried translations.
+        """
         with self.connect() as conn:
+            carried: dict[str, tuple[str, str | None]] = {}
+            if keep_translations:
+                rows = conn.execute(
+                    "SELECT text, translation, translation_config FROM segments "
+                    "WHERE document_id=? AND translation IS NOT NULL",
+                    (doc_id,),
+                ).fetchall()
+                for row in rows:
+                    carried[row["text"]] = (row["translation"], row["translation_config"])
             conn.execute("DELETE FROM segments WHERE document_id=?", (doc_id,))
             conn.execute("DELETE FROM segment_fts WHERE document_id=?", (doc_id,))
+            reused = 0
             for seg in segments:
+                translation = seg.get("translation")
+                config = seg.get("translation_config")
+                if carried and seg["text"] in carried:
+                    translation, config = carried[seg["text"]]
+                    reused += 1
                 conn.execute(
                     """INSERT INTO segments(id, document_id, page, ordinal, text, translation,
-                        bbox, kind, align) VALUES (?,?,?,?,?,?,?,?,?)""",
+                        bbox, kind, align, translation_config) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (
                         seg["id"],
                         doc_id,
                         int(seg["page"]),
                         int(seg["ordinal"]),
                         seg["text"],
-                        seg.get("translation"),
+                        translation,
                         json.dumps(seg["bbox"]),
                         seg.get("kind", "body"),
                         seg.get("align", "exact"),
+                        config,
                     ),
                 )
                 conn.execute(
                     "INSERT INTO segment_fts(segment_id, document_id, page, text) VALUES (?,?,?,?)",
                     (seg["id"], doc_id, int(seg["page"]), seg["text"]),
                 )
+            return reused
 
     def get_segments(self, doc_id: str, page: int | None = None) -> list[dict]:
         sql = (

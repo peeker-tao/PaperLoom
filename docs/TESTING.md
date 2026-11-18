@@ -8,7 +8,7 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 136 passed in ~9s
+# 150 passed in ~10s
 
 .\.venv\Scripts\python.exe -m ruff check service scripts
 # All checks passed!
@@ -16,17 +16,19 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 13 passed
-node esbuild.config.mjs                         # content/plugin.js ~245 KB
+node esbuild.config.mjs                         # content/plugin.js ~253 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（131 项）
+### 服务端覆盖（150 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
 | `test_service.py` | 鉴权、注册/缓存、任务（进度/取消/重试）、SSE 问答、引用校验、六种分析模板、术语、FTS5、按页翻译 | ✅ |
-| `test_pdf.py` | 段落合并、双栏阅读顺序、扫描件识别、`meta`/`noise` 分类、coverage 上限、**旋转水印过滤**、**连字符接续（`im-`+`plementing` vs `text-`+`to-image`）**、缩进首行分新段、公式/表格/参考文献分类、`PARSER_VERSION` 记录 | ✅ 14 项 |
+| `test_pdf.py` | 段落合并、双栏阅读顺序、扫描件识别、`meta`/`noise` 分类、coverage 上限、**旋转水印过滤**、**连字符接续（`im-`+`plementing` vs `text-`+`to-image`）**、缩进首行分新段、公式/表格/参考文献分类、**摘要前的机构行不当标题**、`PARSER_VERSION` 记录 | ✅ 15 项 |
+| `test_markdown.py` | 英文在前中文在后、Markdown 标题层级、非正文（公式/表格/噪声/机构行）排除、参考文献可选、页面标记为注释、只原文/只译文、未译段落仍显示原文、换行展平、统计与文件名清理、**论文自身标题胜过 Zotero 文件名** | ✅ 11 项 |
+| `test_reparse.py` | 重解析按原文保留已付费译文、可显式丢弃 | ✅ 2 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
 | `test_translation_config.py` | 生成配置身份、过期判定、无出处历史行按需重译 | ✅ |
 | `test_urls.py` | Base URL 归一化、`/v1` 只出现一次、粘贴完整端点时的纠正 | ✅ |
@@ -116,6 +118,43 @@ DST: 摘要。近期文本到图像生成系统的进展在很大程度上由扩
 
 同一任务：30 段、3905 prompt / 1581 completion token、约 $0.0031；长度比中位 0.33
 （英译中正常范围），无 `too_short` / `no_chinese` 标记。
+
+## Markdown 阅读视图（默认视图）
+
+同一篇 21 页论文整篇翻译后导出（`scripts/export_markdown.py`）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\export_markdown.py --document-id <id> --out cogview3.md
+# wrote cogview3.md (37674 chars, 50871 bytes)
+#   english words: 4030  chinese chars: 6045  segments: 371
+```
+
+标题层级全部为真实章节标题（18 个）：
+
+```
+# CogView3: Finer and Faster Text-to-Image Generation via Relay Diffusion
+## Introduction
+## 2 Background
+### 2.1 Text-to-Image Diffusion Models
+### 2.2 Relay Diffusion Models
+### 2.3 Diffusion Distillation
+## 3 Method
+...
+## 5 Conclusion
+## References
+```
+
+正文为「英文一段 + 空行 + 中文一段」，可直接渲染成两个段落：
+
+```
+Diffusion models, as defined by Ho et al . [8], establish a forward diffusion pr
+ocess that gradually adds Gaussian noise to corrupt real data x0 as follows:
+
+由 Ho 等人 [8] 定义的扩散模型建立了一个前向扩散过程，该过程逐步添加高斯噪声以破
+坏真实数据 x0，如下所示：
+```
+
+页边界用 `<!-- pN -->` 注释标记（渲染时不显示），参考文献默认不导出。
 
 ## 真实论文的叠层几何校验
 

@@ -1,5 +1,5 @@
 import { errorText, debug } from "../log";
-import { noteIndexPref, saveNote } from "../notes";
+import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
 import type { ServiceClient } from "../service/client";
 import { ServiceError } from "../service/client";
 import type { ServiceManager } from "../service/manager";
@@ -18,7 +18,7 @@ import type {
   Term,
   TranslationStatus,
 } from "../types";
-import { attachmentContext, attachmentContextFromItem, bestPdfAttachment, createPrefs, currentPage, findPaperLoomNotes, jumpToPage, readerDocument, renderPdfPage } from "../zotero/api";
+import { attachmentContext, attachmentContextFromItem, bestPdfAttachment, copyText, createPrefs, currentPage, findPaperLoomNotes, jumpToPage, readerDocument, renderPdfPage } from "../zotero/api";
 import type { RenderedPage } from "../zotero/api";
 
 export interface PluginHost {
@@ -788,6 +788,69 @@ export class ReaderController {
         this.noteIndex,
       );
       this.notice(updated ? "已更新对话笔记" : "已保存整段对话到 Zotero 笔记");
+      await this.refreshNotes();
+    } catch (error) {
+      this.set({ error: `保存笔记失败：${errorText(error)}` });
+    }
+  }
+
+  // ---------------------------------------------------------------- markdown
+  /**
+   * Fetch the whole document as Markdown (English first, Chinese after).
+   *
+   * The reading view and the two export actions share this so the exported text
+   * is exactly what is on screen.
+   */
+  async loadMarkdown(options: { references?: boolean; original?: boolean; translation?: boolean } = {}) {
+    const document = this.state.document;
+    if (!document) {
+      throw new Error("论文尚未就绪");
+    }
+    return this.client.getMarkdown(document.id, {
+      references: options.references,
+      original: options.original,
+      translation: options.translation,
+    });
+  }
+
+  async copyMarkdown(options: { references?: boolean } = {}): Promise<void> {
+    try {
+      const { markdown, stats } = await this.loadMarkdown(options);
+      if (!copyText(markdown)) {
+        this.set({ error: "无法写入剪贴板，请改用「存为笔记」" });
+        return;
+      }
+      this.notice(`已复制 Markdown（${stats.chars.toLocaleString()} 字符）`);
+    } catch (error) {
+      this.set({ error: `复制失败：${errorText(error)}` });
+    }
+  }
+
+  async saveMarkdownNote(options: { references?: boolean } = {}): Promise<void> {
+    const attachment = this.attachment;
+    const document = this.state.document;
+    if (!attachment || !document) {
+      return;
+    }
+    try {
+      const { markdown } = await this.loadMarkdown(options);
+      if (!markdown.trim()) {
+        this.notice("还没有可导出的内容，请先翻译");
+        return;
+      }
+      const { updated } = await saveMarkdownNote(
+        {
+          dedupeKey: `${document.id}:markdown`,
+          docTitle: document.title,
+          attachment,
+          markdown,
+          model: this.state.model,
+        },
+        attachment.parentItemID || attachment.attachmentItemID,
+        attachment.libraryID,
+        this.noteIndex,
+      );
+      this.notice(updated ? "已更新全文双语笔记" : "已保存全文双语笔记");
       await this.refreshNotes();
     } catch (error) {
       this.set({ error: `保存笔记失败：${errorText(error)}` });

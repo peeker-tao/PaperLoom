@@ -232,4 +232,53 @@ export const SHADOW_CSS = `
   border-top: 1px solid var(--pl-border); background: #fff;
   padding: 8px 12px 10px; max-height: 38%; overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------- markdown */
+.pl-md { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #fdfcf8; }
+.pl-md__toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-bottom: 1px solid var(--pl-border); background: #fff;
+  position: sticky; top: 0; z-index: 5;
+}
+.pl-md__body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 18px 22px 60px;
+  /* Long English lines are hard to read; cap the measure. */
+  max-width: 78ch; margin: 0 auto; width: 100%;
+  font-size: 14px; line-height: 1.62; color: #16191c;
+}
+.pl-md__page {
+  display: flex; align-items: center; gap: 8px;
+  margin: 26px 0 12px; color: var(--pl-muted); font-size: 11px;
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.pl-md__page::after { content: ""; flex: 1; height: 1px; background: var(--pl-border); }
+.pl-md__page:first-child { margin-top: 0; }
+.pl-md__heading { margin: 22px 0 10px; cursor: default; }
+.pl-md__heading--2 { font-size: 19px; font-weight: 700; }
+.pl-md__heading--3 { font-size: 16px; font-weight: 650; }
+.pl-md__heading--4, .pl-md__heading--5, .pl-md__heading--6 { font-size: 14.5px; font-weight: 650; }
+.pl-md__para { margin: 0 0 14px; padding: 4px 8px; border-radius: 5px; cursor: default; }
+.pl-md__para:hover, .pl-md__heading:hover { background: #f4f6f3; }
+.pl-md__para.active, .pl-md__heading.active {
+  background: var(--pl-accent-weak); box-shadow: inset 2px 0 0 var(--pl-accent);
+}
+.pl-md__para--minor { opacity: 0.86; font-size: 13px; }
+.pl-md__en {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: 14.5px; line-height: 1.6; color: #1a1d20;
+}
+.pl-md__zh {
+  margin: 6px 0 0; padding-left: 10px;
+  border-left: 2px solid var(--pl-accent-weak);
+  font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13.8px; line-height: 1.75; color: #24302a;
+}
+.pl-md__zh--heading { margin-top: 4px; border-left-color: var(--pl-accent); font-weight: 600; }
+.pl-md__actions { display: flex; gap: 6px; margin-top: 4px; }
+@media (max-width: 620px) {
+  .pl-md__body { padding: 12px 12px 48px; }
+  .pl-md__en { font-size: 14px; }
+}
 `;

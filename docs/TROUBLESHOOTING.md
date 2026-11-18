@@ -98,8 +98,31 @@ python scripts/check_translation_quality.py --pdf <paper>.pdf --pages 1-2
 ```
 
 If a document was parsed by an older version, PaperLoom re-parses it
-automatically on the next open and tells you in the sidebar; the previous
-translations are void, so translate again (or use "重译过时段落").
+automatically on the next open and tells you in the sidebar. Translations whose
+source text did not change are carried over (the response reports
+`keptTranslations`), so you only translate what actually changed.
+
+## Where do the translations go when I export?
+
+The sidebar's default view and both export paths use the same server-side
+Markdown renderer, so what you read is what you copy:
+
+- `复制 Markdown` puts the whole document on the clipboard;
+- `存为笔记` writes it into a Zotero note attached to the item (saving again
+  overwrites that note instead of creating duplicates);
+- `scripts/export_markdown.py --document-id <id> --out paper.md` writes a file
+  without opening Zotero (the service must be running).
+
+Options: `--original` / `--translation` (default: both), `--no-pages` to drop
+the `<!-- pN -->` markers, `--references` to include the bibliography (skipped
+by default because translating a reference list helps nobody). Figures,
+equations and table cells are not part of the text and do not appear in the
+Markdown — open the PDF page for those.
+
+## The Markdown has no Chinese
+
+The document is not translated yet, or the translation is stale
+(`/v1/documents/{id}/translation-status` reports `missing` / `stale`).
 
 ## Bilingual view says "alignment: page"
 
@@ -110,8 +133,10 @@ layout-preserving PDF, or translate page ranges separately.
 
 ## The layout (overlay) view falls back to plain text
 
-The overlay view renders the real page bitmap and anchors translations to their
-original boxes. It falls back to the text columns when:
+The sidebar opens in the reading view (English paragraph, then Chinese). The
+`版式` button switches to the page-accurate overlay, which renders the real page
+bitmap and anchors translations to their original boxes. That view falls back to
+the text columns when:
 
 - the page is **rotated** — a plain scale + y-flip cannot reproduce pdf.js's
   rotation matrix, so the overlay would land on the wrong text;

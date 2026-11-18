@@ -109,6 +109,54 @@ export async function saveNote(
   return { note, updated: false };
 }
 
+/**
+ * Save the whole bilingual document (Markdown, English then Chinese) as a note.
+ *
+ * Re-saving overwrites the same note instead of piling up copies, which is what
+ * a reader expects after re-translating a paper.
+ */
+export async function saveMarkdownNote(
+  input: { dedupeKey: string; docTitle: string; attachment: AttachmentContext; markdown: string; model?: string },
+  parentItemID: number,
+  libraryID: number,
+  noteIndex: { get(): Record<string, string>; set(value: Record<string, string>): void },
+): Promise<{ note: any; updated: boolean }> {
+  const body = renderMarkdown(input.markdown);
+  const html = [
+    `<div data-paperloom-key="${escapeHtml(input.dedupeKey)}">`,
+    `<h2>PaperLoom · 全文双语（英中对照）</h2>`,
+    `<p><strong>论文：</strong>${escapeHtml(input.docTitle)}</p>`,
+    `<p><a href="zotero://open-pdf/library/items/${escapeHtml(input.attachment.attachmentKey)}">在 PDF 中打开</a>` +
+      ` · 生成模型：${escapeHtml(input.model || "未知")} · ${new Date().toLocaleString("zh-CN")}</p>`,
+    `<div class="paperloom-markdown">${body}</div>`,
+    "</div>",
+  ].join("\n");
+
+  const index = noteIndex.get();
+  const existingKey = index[input.dedupeKey];
+  if (existingKey) {
+    try {
+      const existing = Zotero.Items.getByLibraryAndKey(libraryID, existingKey);
+      if (existing) {
+        existing.setNote(html);
+        await existing.saveTx();
+        return { note: existing, updated: true };
+      }
+    } catch {
+      // Fall through and create a new note.
+    }
+  }
+  const note = new Zotero.Item("note");
+  note.libraryID = libraryID;
+  note.parentID = parentItemID;
+  note.setNote(html);
+  note.addTag("PaperLoom", 1);
+  await note.saveTx();
+  index[input.dedupeKey] = note.key;
+  noteIndex.set(index);
+  return { note, updated: false };
+}
+
 export function noteIndexPref(prefs: { get(key: string, fallback: unknown): unknown; set(key: string, value: unknown): void }) {
   return {
     get(): Record<string, string> {

@@ -34,6 +34,7 @@ from .db import Database, now
 from .deepseek import DeepSeekClient, DeepSeekError
 from .glossary import extract_terms, glossary_block
 from .jobs import JobManager
+from .markdown import markdown_stats, render_markdown, suggested_filename
 from .models import (
     AnalysisRequest,
     ChatRequest,
@@ -430,6 +431,35 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         segments = state.db.get_segments(document_id, page)
         return {"segments": segments, "count": len(segments)}
 
+    @app.get("/v1/documents/{document_id}/markdown")
+    async def get_markdown(
+        document_id: str,
+        original: bool = True,
+        translation: bool = True,
+        pages: bool = True,
+        references: bool = False,
+    ):
+        """Whole document as Markdown: English first, Chinese after.
+
+        This is the reading/export format: it needs no PDF layout, reflows at any
+        width, and can be pasted straight into notes or a text editor.
+        """
+        doc = state.doc_or_404(document_id)
+        segments = state.db.get_segments(document_id)
+        markdown = render_markdown(
+            doc,
+            segments,
+            include_original=original,
+            include_translation=translation,
+            include_pages=pages,
+            include_references=references,
+        )
+        return {
+            "markdown": markdown,
+            "filename": suggested_filename(doc),
+            "stats": markdown_stats(markdown, segments),
+        }
+
     @app.post("/v1/documents/{document_id}/reparse")
     async def reparse_document(document_id: str):
         doc = state.doc_or_404(document_id)
@@ -453,11 +483,12 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "parser_version": parsed["parser_version"],
             }
         )
-        state.db.replace_segments(document_id, parsed["segments"])
+        reused = state.db.replace_segments(document_id, parsed["segments"])
         updated = state.db.get_document(document_id) or doc
         return {
             "document": state.document_payload(updated),
             "segmentCount": len(parsed["segments"]),
+            "keptTranslations": reused,
         }
 
     @app.get("/v1/documents/{document_id}/translation-status")

@@ -178,6 +178,32 @@ export class ServiceClient {
     );
   }
 
+  /** Whole document as Markdown (English first, Chinese after). */
+  getMarkdown(
+    documentId: string,
+    options: { original?: boolean; translation?: boolean; pages?: boolean; references?: boolean } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (options.original === false) {
+      params.set("original", "false");
+    }
+    if (options.translation === false) {
+      params.set("translation", "false");
+    }
+    if (options.pages === false) {
+      params.set("pages", "false");
+    }
+    if (options.references) {
+      params.set("references", "true");
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.request<{
+      markdown: string;
+      filename: string;
+      stats: { chars: number; bytes: number; englishWords: number; chineseChars: number; segments: number };
+    }>(`/v1/documents/${documentId}/markdown${query}`);
+  }
+
   startTranslation(documentId: string, options: Record<string, unknown> = {}) {
     return this.request<{ job: import("../types").Job }>("/v1/jobs", {
       method: "POST",

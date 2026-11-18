@@ -20,10 +20,11 @@ from pdfminer.layout import LAParams, LTChar, LTTextContainer, LTTextLine
 log = logging.getLogger("paperloom.pdf")
 
 # Bump whenever segmentation output changes: documents parsed by an older
-# version are transparently re-parsed (their segment ids no longer match).
+# version are transparently re-parsed (translations are carried over by text).
 # v3: cross-page continuation keeps a single-page bbox; rotated stamps filtered;
 #     references/equations/table cells classified.
-PARSER_VERSION = 3
+# v4: author affiliations above the abstract are no longer read as headings.
+PARSER_VERSION = 4
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
@@ -36,7 +37,7 @@ MATH_OPERATOR_RE = re.compile(r"[=∼∝∥▷◃⊤⊥⟨⟩→←↔∑∫√�
 CAPTION_RE = re.compile(
     r"^(fig(?:ure)?\.?|table|tab\.|algorithm|scheme)\s*\d+", re.IGNORECASE
 )
-SECTION_RE = re.compile(r"^(\d+(\.\d+)*|[IVX]+\.)\s+\S")
+SECTION_RE = re.compile(r"^\d+(\.\d+)*\s+\S")
 REFERENCE_RE = re.compile(r"^\[\d+\]|^[A-Z][a-z]+,\s+[A-Z]\.|^doi:", re.IGNORECASE)
 # Reference lists use many numbering styles; a single line rarely tells, but a
 # run of them does. "1. Achiam, J., Adler, S., ..." is as common as "[12]".
@@ -441,7 +442,7 @@ def _mark_reference_sections(segments: list[dict]) -> None:
             if in_references and POST_REFERENCES_RE.match(text):
                 in_references = False
                 continue
-        if in_references and kind not in {"title", "heading"}:
+        if in_references and kind != "title":
             seg["kind"] = "reference"
 
 
@@ -463,7 +464,7 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
         return "caption"
     if len(text) < 160 and size >= body_size * 1.08 and not text.rstrip().endswith("."):
         return "heading"
-    if SECTION_RE.match(text) and len(text) < 160:
+    if _looks_like_section_heading(text):
         return "heading"
     if pages and page >= pages * 0.75 and REFERENCE_RE.match(text):
         return "reference"
@@ -476,6 +477,29 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
     if page == 1 and re.match(r"^abstract\b", text, re.IGNORECASE):
         return "abstract"
     return "body"
+
+
+def _looks_like_section_heading(text: str) -> bool:
+    """True for "3 Method", "2.1 Text-to-Image Models", "IV. Results".
+
+    A leading number alone is not enough: figures, tables and equations start
+    with numbers too ("1024 (bottom). All prompts are ...", "0 + σtϵ, t, ctext)").
+    Real headings are short, the number is small, and a capitalised word follows.
+    """
+    stripped = text.strip()
+    if len(stripped) >= 160:
+        return False
+    # "1. Achiam, J., Adler, S., et al.: Gpt-4 ..." starts like a section number.
+    if _looks_bibliographic(stripped):
+        return False
+    match = re.match(r"^(?P<num>\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+(?P<rest>\S.*)$", stripped)
+    if match:
+        rest = match.group("rest")
+        # "0 + σtϵ" / "1024 × 1024" are not headings; "2 Background" is.
+        return bool(re.match(r"^[A-Z\u4e00-\u9fff]", rest)) and not _is_math_fragment(
+            stripped
+        )
+    return bool(re.match(r"^[IVX]{1,4}\.\s+[A-Z]", stripped))
 
 
 def _is_math_fragment(text: str) -> bool:
@@ -540,6 +564,37 @@ def _mark_layout_fragments(segments: list[dict]) -> None:
         if len(cell_candidates) >= 3:
             for seg in cell_candidates:
                 seg["kind"] = "table"
+
+
+def _mark_affiliations_as_meta(segments: list[dict]) -> None:
+    """Flag the author/affiliation block at the top of page 1.
+
+    Affiliation lines such as "2 Zhipu AI" or "1 Tsinghua University" match the
+    section-number pattern, so they were classified as headings and showed up in
+    the Markdown outline as fake chapters. Real headings never appear before the
+    abstract on page 1, which makes them safe to demote.
+    """
+    abstract_index = None
+    for index, seg in enumerate(segments):
+        if seg["page"] != 1:
+            break
+        if seg.get("kind") == "abstract" or re.match(
+            r"^abstract\b", seg["text"].strip(), re.IGNORECASE
+        ):
+            abstract_index = index
+            break
+    if abstract_index is None:
+        return
+    for seg in segments[:abstract_index]:
+        if seg.get("kind") in {"title"}:
+            continue
+        text = seg["text"].strip()
+        if len(text) > 160:
+            continue
+        # Keep the visible paper title: it is the only large line in this block.
+        if seg.get("kind") == "heading" and len(text) > 40:
+            continue
+        seg["kind"] = "meta"
 
 
 def _math_ratio(text: str) -> float:
@@ -662,6 +717,8 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     _mark_reference_sections(merged_segments)
     # Equations and table cells look like short "body" paragraphs otherwise.
     _mark_layout_fragments(merged_segments)
+    # "2 Zhipu AI" looks like a section number; it is an affiliation.
+    _mark_affiliations_as_meta(merged_segments)
 
     # Re-number ids sequentially so they remain stable and readable.
     for index, seg in enumerate(merged_segments):

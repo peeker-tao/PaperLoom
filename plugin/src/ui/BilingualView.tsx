@@ -2,28 +2,29 @@ import { useEffect, useRef, useState } from "react";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Segment, Selection } from "../types";
 import type { RenderedPage } from "../zotero/api";
+import { MarkdownReading } from "./MarkdownReading";
 import { overlayGeometry } from "./overlay";
 import { IconButton } from "./common";
 
-type Layout = "overlay" | "text";
+type Layout = "markdown" | "overlay";
 
 /**
  * Bilingual reading view.
  *
- * Two layouts share one source of truth (the segment list):
+ * The default layout is Markdown: the paper as reflowed text, English first and
+ * Chinese underneath, page by page. It needs no PDF layout, stays readable at
+ * any width, never truncates a paragraph to fit a box, and can be exported as
+ * Markdown.
  *
- *  - "overlay" renders the real PDF page bitmap and draws the translated
- *    paragraphs at their original coordinates, so figures, formulas, tables and
- *    the page layout survive. Boxes are anchored to the page, so clicking one
- *    jumps to that paragraph in the PDF viewer.
- *  - "text" is the reflowed text column, used when pdf.js cannot render the page
- *    (still loading, rotated page, render error) or by explicit choice.
+ * "overlay" is the optional layout-preserving view: the real page bitmap with
+ * the translation drawn on top, useful when figures and equations matter more
+ * than comfortable reading.
  */
 export function BilingualView(props: { controller: ReaderController; state: UIState }): JSX.Element | null {
   const { controller, state } = props;
   const [active, setActive] = useState<string | null>(null);
   const [picked, setPicked] = useState<Selection | null>(null);
-  const [layout, setLayout] = useState<Layout>("overlay");
+  const [layout, setLayout] = useState<Layout>("markdown");
   const [showNoise, setShowNoise] = useState(false);
   const [image, setImage] = useState<RenderedPage | null>(null);
   const [renderFailed, setRenderFailed] = useState(false);
@@ -100,7 +101,9 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
       <div className="pl-bilingual__bar">
         <span className="pl-title">双语对照</span>
         <span className="pl-small pl-muted">
-          第 {state.page} / {document.pages} 页 · 本页 {translated}/{pageSegments.length} 段已译
+          {layout === "markdown"
+            ? `全文 ${state.segments.length} 段`
+            : `第 ${state.page} / ${document.pages} 页 · 本页 ${translated}/${pageSegments.length} 段已译`}
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -126,13 +129,17 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         </button>
         <button
           type="button"
-          className="pl-btn pl-btn--ghost"
-          title={layout === "overlay" ? "切换为纯文本双栏" : "切换为保留版式（图片/公式不丢失）"}
-          onClick={() => setLayout(layout === "overlay" ? "text" : "overlay")}
+          className={`pl-btn${layout === "overlay" ? " pl-btn--primary" : ""}`}
+          title={
+            layout === "markdown"
+              ? "切换为保留版式（页面原图 + 译文叠放，图片公式不丢）"
+              : "切换回纯文本阅读（推荐）"
+          }
+          onClick={() => setLayout(layout === "markdown" ? "overlay" : "markdown")}
         >
-          {layout === "overlay" ? "纯文本" : "版式"}
+          {layout === "markdown" ? "版式" : "阅读"}
         </button>
-        {noiseCount ? (
+        {layout === "overlay" && noiseCount ? (
           <button
             type="button"
             className="pl-btn pl-btn--ghost"
@@ -142,23 +149,30 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
             {showNoise ? `隐藏 ${noiseCount} 片段` : `显示 ${noiseCount} 片段`}
           </button>
         ) : null}
-        <IconButton title="上一页" onClick={() => controller.jumpTo(Math.max(1, state.page - 1))}>
-          ‹
-        </IconButton>
-        <input
-          className="pl-input"
-          style={{ width: 54, textAlign: "center" }}
-          value={state.page}
-          onChange={(event) => {
-            const page = Number(event.target.value);
-            if (page >= 1 && page <= document.pages) {
-              controller.jumpTo(page);
-            }
-          }}
-        />
-        <IconButton title="下一页" onClick={() => controller.jumpTo(Math.min(document.pages, state.page + 1))}>
-          ›
-        </IconButton>
+        {layout === "overlay" ? (
+          <>
+            <IconButton title="上一页" onClick={() => controller.jumpTo(Math.max(1, state.page - 1))}>
+              ‹
+            </IconButton>
+            <input
+              className="pl-input"
+              style={{ width: 54, textAlign: "center" }}
+              value={state.page}
+              onChange={(event) => {
+                const page = Number(event.target.value);
+                if (page >= 1 && page <= document.pages) {
+                  controller.jumpTo(page);
+                }
+              }}
+            />
+            <IconButton
+              title="下一页"
+              onClick={() => controller.jumpTo(Math.min(document.pages, state.page + 1))}
+            >
+              ›
+            </IconButton>
+          </>
+        ) : null}
         <button type="button" className="pl-btn pl-btn--ghost" onClick={() => controller.toggleBilingual(false)}>
           返回 PDF
         </button>
@@ -190,6 +204,9 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         </div>
       ) : null}
 
+      {layout === "markdown" ? (
+        <MarkdownReading controller={controller} state={state} mode={mode} />
+      ) : (
       <div
         ref={stageRef}
         className="pl-bilingual__cols"
@@ -213,9 +230,9 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
           />
         ) : (
           <>
-            {layout === "overlay" && renderFailed ? (
+            {renderFailed ? (
               <div className="pl-card pl-card--warn pl-small" style={{ margin: "8px 12px 0" }}>
-                无法渲染页面图像（可能尚未加载完成或页面被旋转），已回退为纯文本双栏。
+                无法渲染页面图像（可能尚未加载完成或页面被旋转），已回退为纯文本。
               </div>
             ) : null}
             {pageSegments.map((segment) => (
@@ -256,8 +273,9 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
           </>
         )}
       </div>
+      )}
 
-      {activeSegment ? (
+      {layout === "overlay" && activeSegment ? (
         <div className="pl-page-detail">
           <div className="pl-row pl-row--between">
             <span className="pl-small pl-muted">
