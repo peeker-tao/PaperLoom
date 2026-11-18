@@ -40,7 +40,7 @@ export class ServiceClient {
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const { baseUrl } = this.require();
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await this.fetchOrExplain(`${baseUrl}${path}`, {
       ...init,
       headers: this.headers((init.headers as Record<string, string>) || {}),
     });
@@ -48,6 +48,31 @@ export class ServiceClient {
       throw await this.toError(response);
     }
     return (await response.json()) as T;
+  }
+
+  /**
+   * `fetch` that turns "nothing is listening" into an actionable message.
+   *
+   * It rejects with an opaque TypeError when the service is not running. Report
+   * that raw and the user sees "NetworkError when attempting to fetch resource",
+   * which is exactly what a crashed service looks like: the port was cached from
+   * the last successful `/health`, so `require()` cannot notice the process is
+   * gone. Every call — including 翻译 — then failed with that unhelpful text.
+   */
+  private async fetchOrExplain(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      if (error instanceof ServiceError) {
+        throw error;
+      }
+      throw new ServiceError(
+        "本地服务无响应。请确认 PaperLoom 服务正在运行（设置 → 自检 可查看端口）。",
+        0,
+        "service_down",
+        true,
+      );
+    }
   }
 
   private async toError(response: Response): Promise<ServiceError> {
@@ -110,7 +135,7 @@ export class ServiceClient {
     if (options.bbox && options.bbox.length === 4) {
       params.set("bbox", options.bbox.map((value) => Number(value) || 0).join(","));
     }
-    const response = await fetch(
+    const response = await this.fetchOrExplain(
       `${baseUrl}/v1/documents/${encodeURIComponent(documentId)}/page/${page}.png?${params.toString()}`,
       { headers: this.headers() },
     );
@@ -122,7 +147,7 @@ export class ServiceClient {
 
   async *stream(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<SSEEvent> {
     const { baseUrl } = this.require();
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await this.fetchOrExplain(`${baseUrl}${path}`, {
       method: "POST",
       headers: this.headers({ Accept: "text/event-stream" }),
       body: JSON.stringify(body),

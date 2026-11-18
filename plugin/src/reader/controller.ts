@@ -1142,9 +1142,11 @@ export class ReaderController {
     }
     this.set({ translating: true, error: null });
     try {
-      const { job } = await this.host.service.client.startTranslation(document.id, {
-        pages: pages && pages.length ? pages : null,
-      });
+      const { job } = await this.withService(() =>
+        this.host.service.client.startTranslation(document.id, {
+          pages: pages && pages.length ? pages : null,
+        }),
+      );
       this.set({ job });
       await this.followJob(job.id);
     } catch (error) {
@@ -1594,6 +1596,30 @@ export class ReaderController {
   }
 
   // ---------------------------------------------------------------- errors
+  /**
+   * Run a service call, reviving a dead service once before giving up.
+   *
+   * `ServiceManager.ensure()` pings the cached port, then re-discovers or
+   * respawns the process. Without this the cached endpoint keeps pointing at a
+   * service that is gone, so every action — 翻译 included — fails until the
+   * reader is reopened. The retry is safe: the first attempt either never
+   * reached the server or failed before doing any work.
+   */
+  private async withService<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (
+        error instanceof ServiceError &&
+        (error.code === "service_down" || error.status === 0)
+      ) {
+        await this.host.service.ensure();
+        return await action();
+      }
+      throw error;
+    }
+  }
+
   friendlyError(error: unknown): string {
     if (error instanceof ServiceError) {
       if (error.code === "service_down" || error.status === 0) {

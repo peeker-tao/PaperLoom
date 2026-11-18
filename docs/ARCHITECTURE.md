@@ -122,6 +122,14 @@ into an object URL. `capabilities.render.available` reports whether
 `pypdfium2` is installed; when it is not, the UI keeps the text fallback. The
 plugin still has a client-side canvas path, used only if the service call fails.
 
+pdfium is **not thread-safe**, and a `def` endpoint runs on a worker thread, so
+a page with several figures would enter the library concurrently — which does
+not raise, it crashes the process (the service vanished mid-read leaving only
+`TIME_WAIT` sockets and no traceback, after which every call failed with
+"connection refused"). All rendering therefore goes through one module-level
+lock, and finished bitmaps are cached (24 entries keyed by file stamp, page,
+width and bbox) because the sidebar re-requests the same crops on every refresh.
+
 Re-parsing is versioned (`PARSER_VERSION`, currently `8`). When it runs,
 translations are matched back by source text
 (`replace_segments(..., keep_translations=True)`), so improving segmentation

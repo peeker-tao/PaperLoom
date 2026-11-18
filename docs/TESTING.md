@@ -8,7 +8,7 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 178 passed in ~10s
+# 180 passed in ~10s
 
 .\\.venv\\Scripts\\python.exe -m ruff check service scripts
 # All checks passed!
@@ -21,7 +21,7 @@ node esbuild.config.mjs                         # content/plugin.js ~269 KB
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（178 项）
+### 服务端覆盖（180 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ node esbuild.config.mjs                         # content/plugin.js ~269 KB
 | `test_reparse.py` | 重解析按原文保留已付费译文、可显式丢弃 | ✅ 2 项 |
 | `test_figures.py` | 图/表区域检测：相邻文本块定界、过窄间隙拒绝、区域内正文拒绝、**表格逐格吸收**、**同页两张表各取自己那一张**、``Table 1 shows …`` 不当题注、图片排在题注之前 | ✅ 7 项 |
 | `test_layout.py` | 版面切分回归：**同一行被拆成两个对象后重新拼合**、**跨栏跨页接续**、短行结束段落、标题不吞下一段、跨栏 bbox 只锚定主体列、`E-`+`RayZer` 不加空格、连字符与复合词区分、**公式打断的句子重新接上**、**小节标签不再劈开句子**、**`(cid:N)` 残片判为公式** | ✅ 10 项 |
-| `test_render.py` | 页面渲染：整页 PNG、`bbox` 裁切尺寸、畸形 bbox 拒绝、页码越界拒绝、未知文档 404、`capabilities.render` 上报（缺 `pypdfium2` 时自动跳过） | ✅ 6 项 |
+| `test_render.py` | 页面渲染：整页 PNG、`bbox` 裁切尺寸、畸形 bbox 拒绝、页码越界拒绝、未知文档 404、`capabilities.render` 上报、**8 线程并发渲染不弄崩 pdfium**、**相同请求命中缓存**（缺 `pypdfium2` 时自动跳过） | ✅ 8 项 |
 | `test_client_log.py` | 插件日志落盘、需鉴权、单次最多 200 行、成功请求写 `METHOD path -> status`、令牌错误写 401 | ✅ 5 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
 | `test_translation_config.py` | 生成配置身份、过期判定、无出处历史行按需重译 | ✅ |

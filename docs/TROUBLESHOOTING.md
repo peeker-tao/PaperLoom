@@ -139,6 +139,42 @@ to 2 of 86, and the median paragraph from 245 to 337 characters.
 A short line that ends a sentence is a legitimate paragraph end even if the next
 line is indented — the parser deliberately does not glue those together.
 
+## 翻译报错「本地服务无响应」
+
+先看服务是否还活着：
+
+```powershell
+(Invoke-RestMethod http://127.0.0.1:23151/health).version
+```
+
+如果连接被拒，说明进程已退出。0.2.0 以前的一个真实故障是：**读一篇多图论文时，
+服务会在中途消失**——日志在同一秒的三条 `GET …/page/N.png` 之后就断了，端口只剩
+`TIME_WAIT`，stderr 里没有任何 traceback。这不是 Python 异常，是 pdfium 的段错误：
+`pypdfium2` 不是线程安全的，而 FastAPI 会把每个 `def` 端点放到线程池里，一页上的
+几张图就会同时进入 pdfium。
+
+0.2.1 起渲染被一把模块级锁串行化，并缓存了已渲染的页/裁切。判定方法：
+
+```powershell
+# 复现：并发请求 17 页；修复前会出现 500 甚至进程消失
+foreach ($p in 1..17) {
+  Start-Job { Invoke-WebRequest "http://127.0.0.1:23151/v1/documents/<id>/page/$using:p.png" `
+    -Headers @{'X-PaperLoom-Token'=(Get-Content "$env:APPDATA\PaperLoom\token")} } | Out-Null
+}
+(Invoke-RestMethod http://127.0.0.1:23151/health).version   # 仍然要能返回
+```
+
+如果服务确实没在跑，重新拉起即可（插件在下次操作时也会自动重启它）：
+
+```powershell
+Start-Process -FilePath '<仓库>\.venv\Scripts\python.exe' `
+  -ArgumentList '-m','paperloom_service','--port','23151','--data-dir',"$env:APPDATA\PaperLoom" `
+  -WindowStyle Hidden
+```
+
+排查时更有用的两个位置：`%APPDATA%\PaperLoom\logs\service.log`（每个请求的
+`METHOD path -> status`）与插件的 **设置 → 自检**（逐项测试并显示耗时）。
+
 ## A figure says "图片需要回到 PDF 查看"
 
 Figure cropping used to run in the plugin with pdf.js, which is not reachable

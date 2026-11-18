@@ -531,6 +531,16 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             raise HTTPException(
                 status_code=400, detail={"code": "render_failed", "message": str(exc)}
             ) from exc
+        except Exception as exc:  # a broken PDF must not 500 silently
+            log.warning("render failed for %s page %s: %s", document_id, page, exc)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "render_failed",
+                    "message": f"图片渲染失败：{exc}",
+                    "retryable": True,
+                },
+            ) from exc
         return Response(
             content=data,
             media_type="image/png",

@@ -6,6 +6,46 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-18
+
+### Fixed
+
+- **翻译直接报错，原因却是服务已经不在了.** Reading a paper with several
+  figures made the local service **disappear**. The log stopped mid-request
+  (three concurrent `GET …/page/N.png` at the same second, then nothing), the
+  port was left with only `TIME_WAIT` sockets, and stderr contained **no
+  traceback** — the signature of a native crash, not a Python exception.
+  `pypdfium2` is not thread-safe, and FastAPI runs every `def` endpoint on a
+  worker thread, so a page with several figures entered pdfium concurrently.
+  Reproduced by firing 17 concurrent page renders: a mix of 500s, then the
+  process gone. Rendering is now serialized behind one module-level lock, and
+  17 concurrent renders all return 200 with the service still alive.
+- **The error message blamed the wrong thing.** With the service gone, `fetch`
+  rejects with an opaque `TypeError`. The client's port was cached from the last
+  successful `/health`, so the plugin reported
+  "NetworkError when attempting to fetch resource" for every action instead of
+  naming the real cause. `fetch` is now wrapped: a connection failure becomes
+  `本地服务无响应。请确认 PaperLoom 服务正在运行…`.
+- **The plugin now recovers on its own.** A `service_down` error triggers one
+  `ServiceManager.ensure()` (ping → re-discover → respawn) and a single retry
+  before the error is shown, so a service that died no longer needs Zotero to be
+  reopened.
+- A render failure now returns `500 render_failed` with a message and
+  `retryable: true` instead of a bare `Internal Server Error`.
+
+### Changed
+
+- Rendered pages and crops are cached (24 entries, keyed by file stamp, page,
+  width and bbox). Re-rendering the same figure — which the sidebar does on
+  every refresh — now costs nothing: a second pass over all 17 pages of a paper
+  took 0.07 s instead of 1.22 s.
+
+### Tests
+
+- `test_concurrent_renders_do_not_crash_pdfium` and
+  `test_identical_requests_are_served_from_the_cache` reproduce the crash and
+  pin the cache. 180 service tests, 17 plugin tests, ruff clean.
+
 ## [0.2.0] - 2026-11-19
 
 Reading view gets both fixes it needed: every paragraph is a complete sentence,

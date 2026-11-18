@@ -75,3 +75,45 @@ async def test_unknown_document_is_404(client):
 async def test_capability_is_reported(client):
     body = (await client.get("/v1/status")).json()
     assert body["capabilities"]["render"]["available"] is True
+
+
+def test_concurrent_renders_do_not_crash_pdfium(pdf_path):
+    """Regression: pdfium is not thread-safe and used to take the service down.
+
+    FastAPI runs every `def` endpoint on a worker thread, so a page with several
+    figures asks for several renders at once. Two threads inside pdfium do not
+    raise — they kill the process. Observed live: the service vanished mid-read
+    leaving only TIME_WAIT sockets and no traceback, after which every call
+    (including 翻译) failed with "connection refused".
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from paperloom_service.pdf.render import clear_cache, render_page_png
+
+    clear_cache()
+    jobs = [(1, None), (2, None), (1, (40.0, 600.0, 260.0, 700.0))] * 4
+
+    def run(job):
+        page, box = job
+        return render_page_png(pdf_path, page, width=600, bbox=box)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(run, jobs))
+    assert len(results) == len(jobs)
+    assert all(data.startswith(b"\x89PNG\r\n\x1a\n") for data in results)
+    # Every page-1 render is the same crop; sizes must agree even though pdfium's
+    # anti-aliasing is not bit-for-bit deterministic across runs.
+    assert len({len(data) for data in results[0::3]}) == 1
+
+
+def test_identical_requests_are_served_from_the_cache(pdf_path):
+    """The sidebar re-asks for the same crops on every re-render; do not redo work."""
+    from paperloom_service.pdf.render import clear_cache, render_page_png
+
+    clear_cache()
+    first = render_page_png(pdf_path, 1, width=600)
+    second = render_page_png(pdf_path, 1, width=600)
+    assert first == second
+    # A different width is a different bitmap, not a cache hit.
+    other = render_page_png(pdf_path, 1, width=800)
+    assert other != first
