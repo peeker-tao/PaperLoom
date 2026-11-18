@@ -24,8 +24,11 @@ export const SHADOW_CSS = `
 .pl-sidebar {
   position: absolute;
   top: 0; right: 0; bottom: 0;
-  width: var(--pl-width, 380px);
-  min-width: 300px;
+  /* Clamped to the viewport. A saved width wider than the reader pane pushed
+     the sidebar's left edge off-screen, which silently made the leftmost
+     controls (tabs, the first menu items) impossible to click. */
+  width: min(var(--pl-width, 380px), 100vw);
+  min-width: 0;
   /* Matches SIDEBAR_MAX_WIDTH in the controller: a reading column should be
      able to use the screen instead of stopping at a fixed strip. */
   max-width: min(960px, 100vw);
@@ -116,6 +119,15 @@ export const SHADOW_CSS = `
   border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
 }
 .pl-btn:hover { border-color: #cfd8d4; background: #f7f8f6; }
+/* Interactive elements opt back into hit-testing explicitly. .pl-root has
+   pointer-events: none so clicks on empty space reach the PDF; if any host rule
+   (or a future wrapper) inherits that onto a control, the button would look
+   normal and be dead. */
+.pl-btn, .pl-icon-btn, .pl-tab, .pl-textarea, .pl-input, .pl-select,
+.pl-reopen, .pl-chip button, .pl-md__page button, .pl-md__figure-fallback,
+.pl-seg-overlay, .pl-seg-overlay__line {
+  pointer-events: auto;
+}
 .pl-btn--primary { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; }
 .pl-btn--primary:hover { background: #1c5049; }
 .pl-btn--ghost { border-color: transparent; color: var(--pl-muted); }
@@ -188,7 +200,10 @@ export const SHADOW_CSS = `
 
 /* Bilingual overlay */
 .pl-bilingual {
-  position: absolute; top: 0; left: 0; bottom: 0; right: var(--pl-width, 380px);
+  position: absolute; top: 0; left: 0; bottom: 0;
+  /* Same clamp as .pl-sidebar: the two must agree exactly, otherwise the
+     reading layer slides under the sidebar and covers its controls. */
+  right: min(var(--pl-width, 380px), 100vw);
   background: #fdfcf8; border-right: 1px solid var(--pl-border);
   display: flex; flex-direction: column; pointer-events: auto; z-index: 6;
 }

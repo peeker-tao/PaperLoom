@@ -6,6 +6,35 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-18
+
+### Fixed
+
+- **Controls off-screen in a narrow reader pane.** The sidebar used a fixed
+  `min-width: 300px` and the saved width as-is, so when the reader pane was
+  narrower than the saved width its left edge went past the viewport — the
+  leftmost controls (tabs, the first items in a row) simply could not be
+  clicked. The width is now clamped to `min(var(--pl-width), 100vw)` and the
+  reading layer uses the same clamp, so the two never disagree.
+- **`--pl-width` never reached the sidebar.** The variable was set on `<body>`,
+  but the host element is a child of `<html>` and custom properties only inherit
+  downwards: `var(--pl-width, 380px)` silently fell back to 380px, so the saved
+  width did nothing and the reading layer's right offset stopped matching the
+  sidebar. It is now set on `<html>` and `<body>` both.
+- Every control re-declares `pointer-events: auto`. `.pl-root` is
+  `pointer-events: none` so empty space still forwards clicks to the PDF, and
+  nothing underneath an element with `pointer-events: none` is hit-testable
+  unless it opts back in — a wrapper change could otherwise leave buttons
+  visible but dead.
+
+### Added
+
+- **全部按钮可点击** self-test step. It hit-tests the centre of every control in
+  the sidebar (descending into shadow roots) and names the element that
+  intercepted it, e.g. `双语 被 DIV#cover-test 遮挡`. Verified by injecting a
+  transparent covering layer: all 14 controls were reported, then cleared when
+  the layer was removed.
+
 ## [0.1.8] - 2026-11-18
 
 ### Fixed

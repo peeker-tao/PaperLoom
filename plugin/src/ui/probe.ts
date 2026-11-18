@@ -106,3 +106,64 @@ export function probeFocus(controller: object): ProbeResult {
     return { ok: false, detail: "无法查询焦点状态" };
   }
 }
+
+/** Label a control the way the user would recognise it on screen. */
+function labelOf(element: Element): string {
+  const text = (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 12);
+  if (text) {
+    return `「${text}」`;
+  }
+  const placeholder = element.getAttribute("placeholder");
+  if (placeholder) {
+    return `「${placeholder.slice(0, 8)}」`;
+  }
+  const title = element.getAttribute("title") || element.getAttribute("aria-label");
+  return title ? `「${title.slice(0, 8)}」` : describe(element);
+}
+
+/**
+ * Hit-test every control in the sidebar.
+ *
+ * In Zotero the sidebar is nested inside reader chrome that a plain browser test
+ * never reproduces, and a single covering layer makes *many* buttons look dead
+ * at once. Checking each control's centre point turns that into a list of named
+ * controls plus the element that intercepted them.
+ */
+export function probeInteractive(controller: object): ProbeResult {
+  const root = roots.get(controller);
+  const doc = root?.ownerDocument;
+  const win = doc?.defaultView;
+  if (!root || !doc || !win) {
+    return { ok: false, detail: "侧边栏未挂载" };
+  }
+  const controls = Array.from(
+    root.querySelectorAll("button, input, textarea, select, [role='tab']"),
+  );
+  const blocked: string[] = [];
+  let checked = 0;
+  for (const control of controls) {
+    const rect = control.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) {
+      continue;
+    }
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    if (x < 0 || y < 0 || x > win.innerWidth || y > win.innerHeight) {
+      // Off-screen is a layout problem, not a coverage problem; report it too.
+      blocked.push(`${labelOf(control)} 在可视区之外`);
+      continue;
+    }
+    checked += 1;
+    const top = elementAt(doc, x, y);
+    if (top && (top === control || control.contains(top))) {
+      continue;
+    }
+    blocked.push(`${labelOf(control)} 被 ${describe(top)} 遮挡`);
+  }
+  if (!blocked.length) {
+    return { ok: true, detail: `${checked} 个控件均可点击` };
+  }
+  const shown = blocked.slice(0, 3).join("；");
+  const rest = blocked.length > 3 ? ` 等 ${blocked.length} 个` : "";
+  return { ok: false, detail: shown + rest };
+}

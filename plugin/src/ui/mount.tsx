@@ -16,7 +16,7 @@ const HOST_CSS = `
 }
 body.paperloom-sidebar-open #split-view,
 body.paperloom-sidebar-open #reader-ui {
-  margin-right: var(--pl-width, 380px);
+  margin-right: min(var(--pl-width, 380px), 100vw);
   transition: margin-right 0.18s ease;
 }
 @media print {

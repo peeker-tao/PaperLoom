@@ -1,6 +1,6 @@
 import { errorText, debug, flush } from "../log";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
-import { probeComposer, probeFocus } from "../ui/probe";
+import { probeComposer, probeFocus, probeInteractive } from "../ui/probe";
 import type { ServiceClient } from "../service/client";
 import { ServiceError } from "../service/client";
 import type { ServiceManager } from "../service/manager";
@@ -578,6 +578,14 @@ export class ReaderController {
       return probe.detail;
     });
 
+    await record("全部按钮可点击", async () => {
+      const probe = probeInteractive(this);
+      if (!probe.ok) {
+        throw new Error(probe.detail);
+      }
+      return probe.detail;
+    });
+
     await record("阅读器键盘焦点", async () => {
       const probe = probeFocus(this);
       if (!probe.ok) {
@@ -685,7 +693,14 @@ export class ReaderController {
     if (!doc?.body) {
       return;
     }
-    doc.body.style.setProperty("--pl-width", `${this.state.sidebarWidth}px`);
+    // Set on <html> as well as <body>. The sidebar host is a child of <html>
+    // (see mount.tsx), and CSS custom properties inherit downwards only, so a
+    // value on <body> never reaches it — `var(--pl-width)` then silently fell
+    // back to 380px, which desynchronised the sidebar width and the reading
+    // layer's right offset.
+    const width = `${this.state.sidebarWidth}px`;
+    doc.documentElement?.style.setProperty("--pl-width", width);
+    doc.body.style.setProperty("--pl-width", width);
     doc.body.classList.toggle("paperloom-sidebar-open", this.state.sidebarOpen);
   }
 
