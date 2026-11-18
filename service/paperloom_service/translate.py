@@ -146,9 +146,7 @@ def _parse_translations(text: str) -> dict[str, str]:
     return out
 
 
-def _translate_prompt(
-    batch: list[dict], terms: list[dict], context: str = ""
-) -> str:
+def _translate_prompt(batch: list[dict], terms: list[dict], context: str = "") -> str:
     lines = []
     if context:
         # Read-only background: keeps terminology and pronouns consistent without
@@ -223,7 +221,10 @@ async def _translate_batch(
             single = await client.complete(
                 [
                     {"role": "system", "content": TRANSLATE_SYSTEM},
-                    {"role": "user", "content": _translate_prompt([seg], terms, context)},
+                    {
+                        "role": "user",
+                        "content": _translate_prompt([seg], terms, context),
+                    },
                 ],
                 model=model,
                 max_tokens=min(max_tokens, 2048),

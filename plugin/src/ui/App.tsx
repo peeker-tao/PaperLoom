@@ -237,9 +237,21 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
         >
           <div className="pl-row pl-row--between">
             <span>{state.error}</span>
-            <button type="button" className="pl-btn pl-btn--ghost" onClick={() => controller.openSettings(true)}>
-              设置
-            </button>
+            <span className="pl-row" style={{ gap: 4, flex: "none" }}>
+              <button type="button" className="pl-btn pl-btn--ghost" onClick={() => controller.openSettings(true)}>
+                设置
+              </button>
+              {/* Without a way to dismiss it, one failure left a red banner on
+                  screen for the rest of the session. */}
+              <button
+                type="button"
+                className="pl-btn pl-btn--ghost"
+                title="关闭提示"
+                onClick={() => controller.clearMessages()}
+              >
+                ✕
+              </button>
+            </span>
           </div>
         </div>
       ) : null}

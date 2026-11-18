@@ -66,6 +66,31 @@ export class ServiceClient {
     return new ServiceError(message, response.status, code, retryable);
   }
 
+  /**
+   * Send diagnostic lines to the service log.
+   *
+   * Fire and forget: logging must never fail a user action, and there is no
+   * point retrying — the next line will report the failure anyway.
+   */
+  clientLog(lines: string[], source = "plugin"): void {
+    const endpoint = this.endpoint();
+    if (!endpoint || !lines.length) {
+      return;
+    }
+    try {
+      void fetch(`${endpoint.baseUrl}/v1/client-log`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-PaperLoom-Token": endpoint.token,
+        },
+        body: JSON.stringify({ lines, source }),
+      }).catch(() => undefined);
+    } catch {
+      // Byte-level failure; nothing useful to do from a logger.
+    }
+  }
+
   async *stream(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<SSEEvent> {
     const { baseUrl } = this.require();
     const response = await fetch(`${baseUrl}${path}`, {

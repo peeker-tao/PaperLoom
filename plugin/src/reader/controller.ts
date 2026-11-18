@@ -1,4 +1,4 @@
-import { errorText, debug } from "../log";
+import { errorText, debug, flush } from "../log";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
 import type { ServiceClient } from "../service/client";
 import { ServiceError } from "../service/client";
@@ -47,6 +47,14 @@ export interface AnalysisState {
   error?: string;
   citations?: Citation[];
   model?: string;
+}
+
+/** One line of the "运行自检" report in the settings panel. */
+export interface DiagnosticStep {
+  name: string;
+  ok: boolean;
+  detail: string;
+  ms: number;
 }
 
 export interface NoteSummary {
@@ -184,6 +192,11 @@ export class ReaderController {
         // A broken subscriber must not stop others.
       }
     }
+  }
+
+  /** Clear the transient banners (the error card had no dismiss of its own). */
+  clearMessages(): void {
+    this.set({ error: null, notice: null });
   }
 
   private notice(message: string): void {
@@ -435,6 +448,108 @@ export class ReaderController {
   async restartService(): Promise<void> {
     await this.host.service.restart();
     await this.init();
+  }
+
+  /**
+   * Exercise each capability once and report what actually works.
+   *
+   * "按钮没反应" is impossible to debug from the outside: the failure could be
+   * the service, the token, an unregistered document, a blocked request, or a
+   * crashed render. Running the same calls the buttons make turns that into a
+   * list of pass/fail lines the user can read out.
+   */
+  async runDiagnostics(): Promise<DiagnosticStep[]> {
+    const steps: DiagnosticStep[] = [];
+    const record = async (name: string, run: () => Promise<string>) => {
+      const started = Date.now();
+      try {
+        const detail = await run();
+        steps.push({ name, ok: true, detail, ms: Date.now() - started });
+      } catch (error) {
+        const detail = this.friendlyError(error);
+        steps.push({ name, ok: false, detail, ms: Date.now() - started });
+        debug("diagnostic failed", name, detail);
+      }
+    };
+
+    await record("本地服务", async () => {
+      const status = await this.host.service.client.status();
+      return `${status.version}（接口 v${status.apiVersion}）· LLM ${status.llm}`;
+    });
+
+    await record("实例令牌", async () => {
+      const documents = await this.host.service.client.request<{ documents: unknown[] }>(
+        "/v1/documents",
+      );
+      return `已收录 ${documents.documents.length} 篇论文`;
+    });
+
+    await record("API Key", async () => {
+      const settings = await this.host.service.client.getSettings();
+      if (!settings.apiKey.configured) {
+        throw new Error("未配置 DeepSeek API Key");
+      }
+      return `已配置（${settings.apiKey.hint || "已保存"}）`;
+    });
+
+    const document = this.state.document;
+    await record("论文解析", async () => {
+      if (!document) {
+        throw new Error("侧边栏还没拿到本文档信息");
+      }
+      const { segments } = await this.host.service.client.getSegments(document.id);
+      if (!segments.length) {
+        throw new Error("没有可读文本（扫描件需先 OCR）");
+      }
+      return `${document.pages} 页 · ${segments.length} 段`;
+    });
+
+    await record("翻译状态", async () => {
+      if (!document) {
+        throw new Error("侧边栏还没拿到本文档信息");
+      }
+      const status = await this.host.service.client.translationStatus(document.id);
+      return `已译 ${status.current}/${status.total}，待译 ${status.missing}`;
+    });
+
+    await record("对话流（SSE）", async () => {
+      if (!document) {
+        throw new Error("侧边栏还没拿到本文档信息");
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        let events = 0;
+        for await (const event of this.host.service.client.chat(
+          {
+            documentId: document.id,
+            scope: "paper",
+            messages: [{ role: "user", content: "只回复两个字：收到" }],
+            maxOutputTokens: 32,
+          } as any,
+          controller.signal,
+        )) {
+          events += 1;
+          if (event.event === "delta" || event.event === "done") {
+            break;
+          }
+        }
+        return `收到 ${events} 个事件`;
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+
+    await record("页面渲染（图片裁切）", async () => {
+      const rendered = await this.loadPageImage(this.state.page, 600);
+      if (!rendered) {
+        throw new Error("pdf.js 没有返回页面位图");
+      }
+      return `${rendered.width}×${rendered.height} 像素`;
+    });
+
+    flush();
+    return steps;
   }
 
   openGlossary(open = true): void {
@@ -1241,7 +1356,33 @@ export class ReaderController {
       return;
     }
     if (documentIds.size < 2) {
-      this.set({ error: "请先在主窗口选中至少一篇其它带 PDF 的文献，再点击“论文对比”。" });
+      // No useful selection in the main window: fall back to papers that are
+      // already registered (each was parsed by opening it once). Requiring a
+      // selection made "论文对比" look broken to anyone who did not know it.
+      try {
+        const { documents } = await this.host.service.client.request<{
+          documents: { id: string; title: string }[];
+        }>("/v1/documents");
+        for (const other of documents) {
+          if (documentIds.size >= 3) {
+            break;
+          }
+          if (other.id !== document.id) {
+            documentIds.add(other.id);
+          }
+        }
+        if (documentIds.size >= 2) {
+          this.notice("未在主窗口选中文献，已用已收录的论文进行对比");
+        }
+      } catch (error) {
+        debug("document list for compare failed", errorText(error));
+      }
+    }
+    if (documentIds.size < 2) {
+      this.set({
+        error:
+          "对比需要至少两篇论文：先打开另一篇 PDF 让它被收录，或在主窗口选中一篇带 PDF 的文献再点“论文对比”。",
+      });
       return;
     }
     if (skipped.length) {

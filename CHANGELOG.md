@@ -6,6 +6,41 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-18
+
+### Added
+
+- **"运行自检" in the settings panel.** It calls exactly what the buttons call
+  and prints a pass/fail line for each: local service, instance token, API key,
+  paper parsing, translation status, the chat stream (SSE), and page rendering.
+  A feature that "does nothing" now says which step fails and why, instead of
+  leaving the user to guess.
+- Plugin diagnostics reach disk. The sidebar runs inside the reader iframe,
+  where `Zotero.debug` does not exist — so `debug()` silently produced nothing
+  and a failed click left no trace anywhere. Lines are now buffered (visible in
+  设置) and shipped to `POST /v1/client-log`, which appends them to
+  `<dataDir>/logs/plugin.log` with rotation.
+- The service logs every request (`GET /v1/status -> 200 (7ms)`) and every
+  rejected token. That is the only way to tell "the button did nothing" from
+  "the request never arrived".
+
+### Fixed
+
+- 论文对比 no longer requires selecting papers in the Zotero main window: when
+  nothing is selected it falls back to the papers already registered (each was
+  parsed when it was opened once). The old behaviour — silently refusing with a
+  one-line error — is what "对比用不了" looked like.
+- The error banner has a close button. It used to stay on screen for the rest
+  of the session after a single failure.
+- Uncaught errors and unhandled rejections inside the reader iframe are recorded
+  instead of disappearing.
+
+### Verified
+
+- 162 service tests (5 new for the log endpoint and request logging), 17 plugin
+  tests, `ruff` clean. The self-test was exercised against the live service: all
+  seven steps pass on a healthy install.
+
 ## [0.1.5] - 2026-11-18
 
 ### Added

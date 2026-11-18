@@ -158,6 +158,13 @@ class SearchRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ClientLogRequest(BaseModel):
+    """Diagnostic lines from the plugin UI (which cannot write files itself)."""
+
+    lines: list[str] = Field(default_factory=list)
+    source: str = ""
+
+
 class ExtractTermsRequest(BaseModel):
     document_id: str = Field(alias="documentId")
     model: str | None = None

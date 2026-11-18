@@ -517,7 +517,9 @@ def _looks_like_section_heading(text: str) -> bool:
     # "1. Achiam, J., Adler, S., et al.: Gpt-4 ..." starts like a section number.
     if _looks_bibliographic(stripped):
         return False
-    match = re.match(r"^(?P<num>\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+(?P<rest>\S.*)$", stripped)
+    match = re.match(
+        r"^(?P<num>\d{1,2}(?:\.\d{1,2}){0,3})\.?\s+(?P<rest>\S.*)$", stripped
+    )
     if match:
         rest = match.group("rest")
         # "0 + σtϵ" / "1024 × 1024" are not headings; "2 Background" is.

@@ -70,7 +70,9 @@ def main() -> int:
     allowed = parse_range(args.pages)
     segments = [s for s in result["segments"] if not allowed or s["page"] in allowed]
 
-    translatable = [s for s in segments if s["kind"] not in {"noise", "meta", "reference"}]
+    translatable = [
+        s for s in segments if s["kind"] not in {"noise", "meta", "reference"}
+    ]
     # Only real prose should look like a paragraph; headings, captions and
     # formulas legitimately do not end with a full stop.
     prose = [s for s in translatable if s["kind"] in PROSE_KINDS]
@@ -97,7 +99,8 @@ def main() -> int:
         for m in HYPHEN_TOKEN_RE.finditer(seg["text"])
         # A real leftover is a hyphenated form that never occurs as such while
         # the glued form does appear: "exe-cuting" vs "executing".
-        if m.group(0).lower() not in VOCAB and (m.group(1) + m.group(2)).lower() in VOCAB
+        if m.group(0).lower() not in VOCAB
+        and (m.group(1) + m.group(2)).lower() in VOCAB
     ]
     stamps = [s["id"] for s in segments if STAMP_RE.match(s["text"].strip())][:10]
     tiny = [s["id"] for s in prose if len(s["text"]) < 40]
@@ -122,7 +125,12 @@ def main() -> int:
     # ~25% of prose paragraphs legitimately end mid-sentence: an interleaved
     # display equation or a page break splits them, and reordering text around
     # equations would break the visual correspondence with the PDF.
-    ok = ratio >= 0.75 and len(dangling) <= len(prose) * 0.15 and not stamps and not leftovers
+    ok = (
+        ratio >= 0.75
+        and len(dangling) <= len(prose) * 0.15
+        and not stamps
+        and not leftovers
+    )
     print("\nRESULT:", "PASS" if ok else "NEEDS WORK")
     return 0 if ok else 1
 

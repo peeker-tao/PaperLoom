@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,6 +39,7 @@ from .markdown import markdown_stats, render_markdown, suggested_filename
 from .models import (
     AnalysisRequest,
     ChatRequest,
+    ClientLogRequest,
     ExtractTermsRequest,
     PersistMessage,
     ReadingStatePatch,
@@ -66,6 +68,26 @@ CHAT_SYSTEM = (
 
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+# Plugin-side log file. The sidebar runs inside the reader iframe, where
+# Zotero.debug does not exist; without this the UI's own diagnostics were lost.
+PLUGIN_LOG_LIMIT = 512 * 1024
+
+
+def append_plugin_log(cfg: RuntimeConfig, lines: list[str]) -> None:
+    """Append plugin log lines, rotating once the file gets large."""
+    path = cfg.data_dir / "logs" / "plugin.log"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.exists() and path.stat().st_size > PLUGIN_LOG_LIMIT:
+            path.replace(path.with_suffix(".log.1"))
+        with path.open("a", encoding="utf-8") as handle:
+            for line in lines:
+                handle.write(str(line)[:2000] + "\n")
+    except OSError:
+        # Diagnostics must never take the service down.
+        pass
 
 
 class AppState:
@@ -192,11 +214,29 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             if auth.lower().startswith("bearer "):
                 token = auth[7:].strip()
         if not secrets.compare_digest(token, cfg.token):
+            # Logged because a rejected call is invisible from the plugin side:
+            # the sidebar only sees "请求失败", with no hint that the instance
+            # token is stale (a restarted service with a fresh token looks
+            # exactly like a broken feature).
+            log.warning("401 %s %s (token mismatch)", request.method, path)
             return JSONResponse(
                 status_code=401,
                 content={"detail": {"code": "unauthorized", "message": "实例令牌无效"}},
             )
-        return await call_next(request)
+        started = time.perf_counter()
+        response = await call_next(request)
+        elapsed = (time.perf_counter() - started) * 1000
+        # One line per call: this is the only place where "the button did
+        # nothing" can be told apart from "the button was never clicked".
+        if path != "/v1/client-log":
+            log.info(
+                "%s %s -> %s (%.0fms)",
+                request.method,
+                path,
+                response.status_code,
+                elapsed,
+            )
+        return response
 
     def manager() -> JobManager:
         assert state.jobs is not None
@@ -238,6 +278,18 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "activeJobs": manager().active_count(),
             "documents": len(state.db.list_documents(limit=1000)),
         }
+
+    @app.post("/v1/client-log")
+    async def client_log(req: ClientLogRequest):
+        """Accept diagnostic lines from the plugin UI.
+
+        The sidebar cannot write files (it lives in the reader iframe) and
+        ``Zotero.debug`` is unreachable there, so a failing button used to leave
+        no trace. Two hundred lines per call is enough for a burst and caps the
+        damage of a client stuck in a loop.
+        """
+        append_plugin_log(cfg, req.lines[:200])
+        return {"ok": True, "lines": min(len(req.lines), 200)}
 
     @app.get("/v1/settings")
     async def get_settings():
@@ -364,10 +416,14 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         # segmentation algorithm (e.g. before margin stamps were filtered); they
         # must be rebuilt, otherwise the broken paragraphs persist forever.
         stale_parse = bool(
-            existing
-            and int(existing.get("parser_version") or 0) != PARSER_VERSION
+            existing and int(existing.get("parser_version") or 0) != PARSER_VERSION
         )
-        if existing and existing["file_hash"] == file_hash and not req.force and not stale_parse:
+        if (
+            existing
+            and existing["file_hash"] == file_hash
+            and not req.force
+            and not stale_parse
+        ):
             segs = state.db.get_segments(doc_id)
             return {
                 "document": state.document_payload(existing),

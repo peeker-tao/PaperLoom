@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { ReaderController, UIState } from "../reader/controller";
+import { recentLogs } from "../log";
+import type { DiagnosticStep, ReaderController, UIState } from "../reader/controller";
 import type { SettingsPayload } from "../types";
 import { IconButton } from "./common";
 
@@ -12,6 +13,9 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [steps, setSteps] = useState<DiagnosticStep[] | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
   const [form, setForm] = useState({
     baseUrl: "https://api.deepseek.com",
     translateModel: "deepseek-flash",
@@ -58,9 +62,25 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
       setMessage(null);
       setTestResult(null);
       setApiKey("");
+      setSteps(null);
+      setLogs(recentLogs());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.settingsOpen]);
+
+  const runCheck = async () => {
+    setChecking(true);
+    setMessage(null);
+    try {
+      const report = await controller.runDiagnostics();
+      setSteps(report);
+      setLogs(recentLogs());
+    } catch (error) {
+      setMessage(controller.friendlyError(error));
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
@@ -309,6 +329,9 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
           <div>翻译队列：{diag?.activeJobs ?? 0} 个活动任务</div>
         </div>
         <div className="pl-actions">
+          <button type="button" className="pl-btn pl-btn--primary" disabled={checking} onClick={() => void runCheck()}>
+            {checking ? "自检中…" : "运行自检"}
+          </button>
           <button
             type="button"
             className="pl-btn"
@@ -327,6 +350,47 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
             刷新状态
           </button>
         </div>
+
+        {steps ? (
+          <div className="pl-small" style={{ marginTop: 8 }}>
+            {steps.map((step) => (
+              <div key={step.name} style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                <span style={{ color: step.ok ? "#1f7a4d" : "var(--pl-danger)" }}>
+                  {step.ok ? "✔" : "✘"}
+                </span>
+                <span style={{ minWidth: 96 }}>{step.name}</span>
+                <span style={{ opacity: 0.8, wordBreak: "break-all" }}>
+                  {step.detail}
+                  <span className="pl-muted"> · {step.ms}ms</span>
+                </span>
+              </div>
+            ))}
+            <div className="pl-muted" style={{ marginTop: 8 }}>
+              自检会真实调用一次对话接口（约 20 token）。失败项就是当前不可用的功能。
+            </div>
+          </div>
+        ) : null}
+
+        {logs.length ? (
+          <details style={{ marginTop: 10 }}>
+            <summary className="pl-small pl-muted">最近日志（{logs.length} 条）</summary>
+            <pre
+              className="pl-small"
+              style={{
+                maxHeight: 180,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+                background: "#faf9f5",
+                padding: 8,
+                borderRadius: 4,
+                marginTop: 6,
+              }}
+            >
+              {logs.join("\n")}
+            </pre>
+          </details>
+        ) : null}
       </div>
 
       <div className="pl-card pl-small pl-muted">

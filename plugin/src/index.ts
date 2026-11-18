@@ -1,4 +1,4 @@
-import { debug } from "./log";
+import { debug, flush, installErrorReporting, setLogSink } from "./log";
 import { ReaderController } from "./reader/controller";
 import type { PluginHost } from "./reader/controller";
 import { ServiceManager, dataDirectory } from "./service/manager";
@@ -50,6 +50,12 @@ export async function startup({ id, version, rootURI }: { id: string; version: s
   runtime.client = runtime.service.client;
   runtime.started = true;
 
+  // The sidebar runs inside the reader iframe, where Zotero.debug does not
+  // exist. Ship its diagnostics to the service log instead, so a button that
+  // fails can be diagnosed after the fact.
+  setLogSink((lines) => runtime.client.clientLog(lines));
+  installErrorReporting(globalThis as any);
+
   registerReaderEvents();
   registerPreferencePane();
   for (const win of safeMainWindows()) {
@@ -83,6 +89,8 @@ async function writeStartupHeartbeat(): Promise<void> {
 }
 
 export function shutdown(): void {
+  debug("shutdown requested");
+  flush();
   for (const { type, handler } of runtime.readerEvents) {
     try {
       Zotero.Reader.unregisterEventListener(type, handler);
@@ -349,6 +357,9 @@ function attachReader(reader: any): ReaderController | null {
   const controller = new ReaderController(runtime, reader);
   const unmount = mountController(controller, doc);
   const win = reader._iframeWindow;
+  // Uncaught errors inside the reader iframe would otherwise vanish: that
+  // document has no Zotero global, and the user never sees a console.
+  installErrorReporting(win);
   const detachWindow = () => detachReader(reader);
   try {
     win?.addEventListener("unload", detachWindow, { once: true });

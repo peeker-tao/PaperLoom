@@ -160,7 +160,9 @@ def test_reference_section_is_not_translatable(tmp_path):
     from paperloom_service.translate import is_translatable
 
     doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
-    entries = [s for s in doc["segments"] if "Achiam" in s["text"] or "Ho, J." in s["text"]]
+    entries = [
+        s for s in doc["segments"] if "Achiam" in s["text"] or "Ho, J." in s["text"]
+    ]
     assert entries
     assert all(entry["kind"] == "reference" for entry in entries), [
         (e["text"][:40], e["kind"]) for e in entries

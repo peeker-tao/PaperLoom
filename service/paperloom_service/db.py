@@ -295,7 +295,10 @@ class Database:
                     (doc_id,),
                 ).fetchall()
                 for row in rows:
-                    carried[row["text"]] = (row["translation"], row["translation_config"])
+                    carried[row["text"]] = (
+                        row["translation"],
+                        row["translation_config"],
+                    )
             conn.execute("DELETE FROM segments WHERE document_id=?", (doc_id,))
             conn.execute("DELETE FROM segment_fts WHERE document_id=?", (doc_id,))
             reused = 0
