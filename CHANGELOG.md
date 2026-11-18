@@ -6,6 +6,105 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+Reading view gets both fixes it needed: every paragraph is a complete sentence,
+and figures are actually drawn inside Zotero.
+
+### Fixed
+
+- **一段话被切成两三段.** pdfminer occasionally emits two objects for one
+  visual line. On page 2 of E-RayZer it produced
+  `E-RayZer operates directly in 3D space,` (x 58.5–233.07) and
+  `learning self-` (x 239.09–294.75) — both at `y = 401.84` — which became two
+  separate paragraphs, the second starting with a lowercase word. A line on the
+  same baseline whose start is at or after the previous line's end is now
+  treated as the rest of that line (`continuation`), and is excluded from the
+  column-edge measurement that decides paragraph ends.
+- **段落跨栏被截断.** A paragraph that ran from the bottom of the left column
+  to the top of the right column (`…We highlight key conclusions` at y 78.85,
+  then `and summarize our contributions as follows:` at y 707.89) was never
+  joined. Cross-column merges are now allowed when both lines are body-size and
+  either the previous line ends with a hyphen or it ends with an open sentence
+  and fills at least 86% of the column width.
+- **算式把句子劈成两段.** `"…as self-supervision:"` / `[equation]` /
+  `"where Percep denotes …"` used to become two paragraphs, so the second one
+  was translated as a fragment that starts with a lowercase word. A continuation
+  is now looked for past the interrupting block; a colon counts as an opening
+  tail because it is what introduces a display equation.
+- **小节标签插在句子中间.** `"…results of E-RayZer"` / `"Datasets."` /
+  `"trained on both …"` — a run-in label laid out as its own block between the
+  two halves of a sentence. The label is lifted out of the flow and the sentence
+  rejoined, which fixes the case where the second half started lowercase.
+- **句子被打断后另一半以大写开头.** When an equation or a picture sits inside a
+  sentence, the rest often starts with a capital or a bracket
+  (`"… of target views"` / `"(Itgt) to render …"`), so the "starts lowercase"
+  test alone missed it. A paragraph that stops at a function word
+  (`… are conducted on`), after a comma, or after more than 120 characters
+  without punctuation is now recognised as unfinished.
+- **`E-RayZer` 变成 `E- RayZer`.** The joiner inserted a space after any
+  trailing hyphen. A hyphen at a line break now never adds a space when the next
+  fragment starts with a capital letter, so compound names survive while
+  hyphenation is still repaired.
+- **正文被判成表格单元后整段消失.** `_looks_like_table_cell` treated any short
+  line containing a digit as table furniture, so
+  `supervised 3D reconstruction. Concretely, E-RayZer pre-` was classified
+  `table` and hidden. Cells are now rejected when they contain punctuation
+  *between* words followed by lowercase, or when they carry more than six
+  tokens; `pre-` counts as a word when the digit rule is applied.
+- **`(cid:N)` 残片被当成正文.** pdfminer prints glyphs it cannot map as
+  `(cid:1)`, and those runs became one-line paragraphs
+  (`tgt )(cid:1).`, `ψ ), and rendering (f rend`). They are now typed as
+  formulas, as are short bracket-riddled runs with no sentence punctuation.
+- **表格列头混进正文.** `Self-supervised?`, `Percep. Encoder [7]`,
+  `Pose-sup. Baseline` were shown as paragraphs. A short line with no ordinary
+  lowercase word is now a table cell even when it contains an abbreviation.
+- **标题吞掉下一段.** Merging checked only the incoming line's font size, so
+  `1. Introduction` (12 pt) absorbed `Pre-training with self-supervision…`
+  (10 pt). Both sides are now measured against the body size.
+- **跨栏合并后的框覆盖整页.** The overlay rectangle of a merged cross-column
+  block was the union of both columns. It is now anchored to the column that
+  holds most of the text.
+- **图片显示不了.** Figures were cropped in the plugin with pdf.js, which does
+  not work inside Zotero's reader iframe, so every figure fell back to
+  "图片需要回到 PDF 查看". Cropping moved to the service: `pypdfium2` renders the
+  page and `Pillow` cuts the region.
+
+Measured on E-RayZer (17 pages, 444 segments), before → after:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| Prose segments | 130 | **86** |
+| Median prose length | 245 chars | **337 chars** |
+| Paragraphs starting lowercase | 28 | **2** |
+| Paragraphs not ending a sentence | 35 | **9** |
+
+The two remaining lowercase starts and most of the nine are reading-order
+defects (a figure or a table column extracted out of order), not merge failures.
+
+### Added
+
+- `GET /v1/documents/{document_id}/page/{page}.png?width=&bbox=` — renders a
+  page (or a crop of it) as PNG, `Cache-Control: private, max-age=3600`.
+  Returns 400 `bad_bbox` / `render_failed`, 503 `render_unavailable` when
+  `pypdfium2` is missing.
+- `capabilities.render.available`, surfaced in the 自检 panel as
+  **页面渲染（图片裁切）**.
+- `service/paperloom_service/pdf/render.py` (`render_available`,
+  `render_page_png`, `parse_bbox`).
+- 10 layout tests (`tests/test_layout.py`) built from the real coordinates
+  above, and 6 rendering tests (`tests/test_render.py`) that skip when
+  `pypdfium2` / `Pillow` are absent. They also pin the equation split, the
+  run-in label and the `(cid:N)` debris.
+
+### Changed
+
+- `PARSER_VERSION` is now `8`. Re-parsing keeps existing translations by
+  matching source text, so bumping it no longer discards your work. Expect fewer
+  reused translations after this one — paragraphs were merged, so their source
+  text changed.
+- New service dependencies: `pypdfium2`, `pillow`.
+
 ## [0.1.9] - 2026-11-18
 
 ### Fixed

@@ -91,6 +91,35 @@ export class ServiceClient {
     }
   }
 
+  /**
+   * Fetch a rendered page image from the service.
+   *
+   * Preferred over rendering in the reader: the sidebar has no reliable access
+   * to the reader's pdf.js instance, and when that path failed the reading view
+   * showed "图片需要回到 PDF 查看" — a missing feature from the user's side.
+   */
+  async pageImage(
+    documentId: string,
+    page: number,
+    options: { width?: number; bbox?: number[] } = {},
+  ): Promise<Blob> {
+    const { baseUrl } = this.require();
+    const params = new URLSearchParams({
+      width: String(Math.round(options.width || 1400)),
+    });
+    if (options.bbox && options.bbox.length === 4) {
+      params.set("bbox", options.bbox.map((value) => Number(value) || 0).join(","));
+    }
+    const response = await fetch(
+      `${baseUrl}/v1/documents/${encodeURIComponent(documentId)}/page/${page}.png?${params.toString()}`,
+      { headers: this.headers() },
+    );
+    if (!response.ok) {
+      throw await this.toError(response);
+    }
+    return await response.blob();
+  }
+
   async *stream(path: string, body: unknown, signal?: AbortSignal): AsyncGenerator<SSEEvent> {
     const { baseUrl } = this.require();
     const response = await fetch(`${baseUrl}${path}`, {

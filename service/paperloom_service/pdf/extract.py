@@ -30,7 +30,13 @@ log = logging.getLogger("paperloom.pdf")
 #     the reading view can show the real picture instead of dropping it.
 # v6: table bodies are absorbed cell by cell, and prose that merely mentions a
 #     table ("Table 1 shows ...") is no longer typed as a caption.
-PARSER_VERSION = 6
+# v7: two-column papers keep paragraphs whole — a sentence that continues at the
+#     top of the next column, or in one visual line that pdfminer split in two,
+#     is joined; a heading can no longer swallow the paragraph below it.
+# v8: a sentence interrupted by a display equation, a picture or a run-in label
+#     ("Training." / "Datasets.") is rejoined, and `(cid:N)` glyph runs are typed
+#     as formulas instead of being printed as one-line paragraphs.
+PARSER_VERSION = 8
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
@@ -117,6 +123,15 @@ class TextLine:
     y1: float
     size: float
     bold: bool = False
+    # 0 = full width (above or below both columns), 1 = left, 2 = right,
+    # 3 = full width below. Set by _order_page; used to tell a paragraph that
+    # continues into the next column from two unrelated columns at the same
+    # height.
+    column: int = 0
+    # True when this line is the second half of a visual line that pdfminer
+    # split in two: it starts where its predecessor ended, so its left edge says
+    # nothing about where the text column starts.
+    continuation: bool = False
 
     @property
     def width(self) -> float:
@@ -259,8 +274,16 @@ def _order_page(lines: list[TextLine], width: float) -> list[TextLine]:
         left + [ln for ln in inside if ln.x0 < mid], key=lambda ln: -ln.y1
     )
     right_col = sorted(
-        right + [ln for ln in inside if ln.x0 >= mid], key=lambda ln: -ln.y1
+        [ln for ln in inside if ln.x0 >= mid] + right, key=lambda ln: -ln.y1
     )
+    for line in before:
+        line.column = 0
+    for line in left_col:
+        line.column = 1
+    for line in right_col:
+        line.column = 2
+    for line in after:
+        line.column = 3
     return before + left_col + right_col + after
 
 
@@ -315,6 +338,39 @@ def _can_merge(
         return False
     if line.bold and not prev.bold and line.size > prev.size * 1.05:
         return False
+
+    # pdfminer sometimes splits ONE visual line into two objects when the space
+    # before a word is wide. The halves share a baseline and sit side by side in
+    # the same column, and all the checks below would treat the second half as a
+    # new paragraph — cutting the sentence mid-word ("... directly in 3D space,"
+    # + "learning self-" were emitted as two lines at y=401.84).
+    same_column = prev.column == line.column
+    same_baseline = abs(line.y1 - prev.y1) <= max(2.0, prev.height * 0.4)
+    if same_column and same_baseline and line.x0 >= prev.x1 - 2.0:
+        line.continuation = True
+        return True
+
+    # A paragraph that reaches the bottom of a column continues at the top of
+    # the next one; that is how two-column papers are read. Spacing cannot tell
+    # this apart from two unrelated columns, so the evidence is typesetting:
+    # the last line is either broken mid-word (trailing hyphen) or runs to the
+    # full measure without closing the sentence. A short line means the
+    # paragraph ended there, and a single-line group is a heading, not prose.
+    if not same_column:
+        if {prev.column, line.column} - {1, 2}:
+            return False
+        if len(cur) < 2 or line.text.startswith(("•", "·", "-")):
+            return False
+        if body_size and (
+            abs(prev.size - body_size) > max(0.8, body_size * 0.12)
+            or abs(line.size - body_size) > max(0.8, body_size * 0.12)
+        ):
+            return False
+        if prev.text.endswith("-"):
+            return True
+        open_sentence = not prev.text.endswith(SENTENCE_END)
+        return open_sentence and prev.width >= median_width * 0.86
+
     gap = prev.y0 - line.y1
     if gap < -prev.height * 0.4 or gap > max(prev.size, line.size) * 0.9:
         return False
@@ -335,13 +391,23 @@ def _can_merge(
         # Paragraph continuation lines all start at the column edge. A line
         # indented relative to that edge is a new paragraph, and one that is
         # outdented belongs to a different block (list, footnote, column).
-        edge = min(ln.x0 for ln in cur[1:])
+        # Halves of a split line are excluded: they begin mid-line, so counting
+        # them would move the edge to the right and reject every real
+        # continuation after them.
+        starts = [ln.x0 for ln in cur[1:] if not ln.continuation]
+        edge = min(starts) if starts else cur[0].x0
         delta = line.x0 - edge
         tolerance = max(6.0, prev.size * 0.85)
         if delta > tolerance or delta < -tolerance:
             return False
     # Text set in a different size than the body is a caption/heading/footnote.
-    if body_size and abs(line.size - body_size) > max(0.8, body_size * 0.12):
+    # Both sides are checked: comparing only the incoming line let a heading
+    # ("1. Introduction", 12pt) swallow the paragraph below it (10pt), which
+    # put a chapter title at the head of a paragraph in the reading view.
+    if body_size and (
+        abs(line.size - body_size) > max(0.8, body_size * 0.12)
+        or abs(prev.size - body_size) > max(0.8, body_size * 0.12)
+    ):
         return False
     # A short line that closes with punctuation ends the paragraph.
     return not (prev.width < median_width * 0.72 and prev.text.endswith(SENTENCE_END))
@@ -355,29 +421,37 @@ def _join(a: str, b: str, vocab: set[str] | None = None) -> str:
     "text-to-image"). Removing it blindly produces "textto-image", which
     destroys the very terms these papers are about, so the document vocabulary
     decides and the hyphen is kept when there is no evidence either way.
+
+    A space is never inserted after a trailing hyphen: "E-" + "RayZer" is
+    "E-RayZer", and "E- RayZer" is not a word in any language.
     """
     if not a:
         return b
-    if a.endswith("-") and b[:1].islower():
+    if a.endswith("-"):
         prefix = a[:-1]
         head = re.search(r"([A-Za-z]+)$", prefix)
         tail = re.match(r"([A-Za-z]+)", b)
+        if not (head and tail):
+            return a + b
+        # "E-" + "RayZer": a capital after the hyphen means a name or a
+        # compound, never a hyphenated word ("pre-" + "dicts" is lowercase).
+        if b[:1].isupper():
+            return a + b
+        joined = (head.group(1) + tail.group(1)).lower()
+        hyphenated = f"{head.group(1)}-{tail.group(1)}".lower()
+        if vocab and hyphenated in vocab and joined not in vocab:
+            return a + b  # compound word: keep the hyphen
+        if vocab and joined in vocab and hyphenated not in vocab:
+            return prefix + b  # real hyphenation: drop it
         # "state-of-the-" is a compound continuation, never a hyphenation.
         token = re.search(r"[A-Za-z][A-Za-z-]*$", prefix)
-        compound = bool(token and "-" in token.group(0))
-        if head and tail:
-            joined = (head.group(1) + tail.group(1)).lower()
-            hyphenated = f"{head.group(1)}-{tail.group(1)}".lower()
-            if vocab and hyphenated in vocab and joined not in vocab:
-                return a + b  # compound word: keep the hyphen
-            if vocab and joined in vocab and hyphenated not in vocab:
-                return prefix + b  # real hyphenation: drop it
-            if compound:
-                return a + b
-            # No evidence either way: a very short head ("exe-", "re-", "im-")
-            # is almost always a broken word, a longer one is usually a compound.
-            return prefix + b if len(head.group(1)) <= 3 else a + b
-        return prefix + b
+        if token and "-" in token.group(0):
+            return a + b
+        # No evidence either way: a very short head ("exe-", "re-", "im-")
+        # is almost always a broken word, a longer one is usually a compound.
+        # A dictionary would settle the rest, but the document vocabulary cannot:
+        # a fragment such as "plementing" enters it simply by starting a line.
+        return prefix + b if len(head.group(1)) <= 3 else a + b
     if re.search(r"[\u4e00-\u9fff]$", a) or re.match(r"^[\u4e00-\u9fff]", b):
         return a + b
     return a + " " + b
@@ -538,7 +612,25 @@ def _is_math_fragment(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
+    # pdfminer fails to map some glyphs and prints them as (cid:1) / (cid:0).
+    # Those runs are always parts of an equation, never prose: keeping them as
+    # body text left fragments like "tgt )(cid:1)." as standalone paragraphs.
+    if "(cid:" in stripped:
+        return True
+    # A line that opens with a closing bracket or a comma is the tail of an
+    # equation that was split into two objects ("ψ ), and rendering (f rend").
+    if stripped[0] in ",)]}" and len(stripped) < 90:
+        return True
     words = re.findall(r"[A-Za-z]{2,}", stripped)
+    # "ψ ), and rendering (f rend" — a bracket-riddled short run with no
+    # sentence punctuation is a sliced equation line, not a sentence.
+    if (
+        len(words) <= 8
+        and "(" in stripped
+        and len(stripped) < 90
+        and not re.search(r"\.\s", stripped)
+    ):
+        return True
     # "q(zt|z0) = N (zt|F (x0, t), σt" — an operator with almost no words.
     if MATH_OPERATOR_RE.search(stripped) and len(words) <= 6:
         return True
@@ -563,12 +655,33 @@ def _looks_like_table_cell(text: str) -> bool:
     # Metric headers such as "Aes↑ HPS v2↑ ImageReward↑" are never prose.
     if re.search(r"[↑↓▲▼]", stripped):
         return True
+    # Prose carries punctuation *between* words, followed by lowercase
+    # (". Concretely, E-RayZer"). An abbreviation inside a cell (
+    # "Percep. Encoder [7]") is followed by a capital, so it does not count.
+    if re.search(r"[.,;:]\s+[a-z]", stripped):
+        return False
     tokens = [t for t in stripped.split() if t]
     if not tokens:
         return False
-    lowercase_words = [t for t in tokens if re.fullmatch(r"[a-z]{2,}", t)]
+    # A row of words is a header, not a sentence: real prose of this length
+    # contains verbs and would carry punctuation (handled above).
+    if len(tokens) > 6:
+        return False
+    # Strip the wrapping punctuation before deciding whether a token is an
+    # ordinary lowercase word: "pre-" and "(CID)" are words, not labels.
+    bare = [t.strip(".,;:()[]{}\"'") for t in tokens]
+    lowercase_words = [t for t in bare if re.fullmatch(r"[a-z]{2,}", t)]
     has_digit = any(c.isdigit() for c in stripped)
-    return not lowercase_words or (has_digit and len(lowercase_words) <= 1)
+    # A short line with no ordinary lowercase word is a label, not a sentence:
+    # "Self-supervised?" (a table column header) used to be printed as a
+    # one-line paragraph in the middle of the reading view.
+    if not lowercase_words and len(stripped) <= 40:
+        return True
+    # "SDXL [17]" / "0.5, MVImgNet". The token limit matters: without it any
+    # sentence carrying a number was taken for a cell, and
+    # "supervised 3D reconstruction. Concretely, E-RayZer pre-" disappeared from
+    # the reading view along with the rest of its paragraph.
+    return has_digit and len(tokens) <= 3 and len(lowercase_words) <= 1
 
 
 def _mark_layout_fragments(segments: list[dict]) -> None:
@@ -660,16 +773,30 @@ def _merge_page(
             text = _join(text, line.text, vocab)
         if vocab:
             text = _repair_hyphenation(text, vocab)
+        # A paragraph that runs from one column into the next would otherwise
+        # get a box spanning both columns — i.e. most of the sheet — which the
+        # overlay view paints over (hiding figures and the rest of the page).
+        # Same rule as the cross-page merge below: the part holding more text
+        # keeps the box.
+        columns = {ln.column for ln in group}
+        if len(columns) > 1:
+            primary = max(
+                columns,
+                key=lambda col: sum(len(ln.text) for ln in group if ln.column == col),
+            )
+            box_lines = [ln for ln in group if ln.column == primary]
+        else:
+            box_lines = group
         seg = {
             "id": f"p{page}-s{index}",
             "page": page,
             "ordinal": index,
             "text": text,
             "bbox": [
-                round(min(ln.x0 for ln in group), 2),
-                round(min(ln.y0 for ln in group), 2),
-                round(max(ln.x1 for ln in group), 2),
-                round(max(ln.y1 for ln in group), 2),
+                round(min(ln.x0 for ln in box_lines), 2),
+                round(min(ln.y0 for ln in box_lines), 2),
+                round(max(ln.x1 for ln in box_lines), 2),
+                round(max(ln.y1 for ln in box_lines), 2),
             ],
             "size": round(statistics.median(ln.size for ln in group), 2),
             "align": "merged" if len(group) > 1 else "exact",
@@ -677,6 +804,219 @@ def _merge_page(
         seg["kind"] = _classify(seg, page, 0, body_size)
         segments.append(seg)
     return segments
+
+
+# A paragraph interrupted by a display equation or a picture keeps going after
+# it, so the continuation search has to look past these kinds. Headings and the
+# title are *not* in this set: they really do start a new paragraph.
+CONTINUATION_TRANSPARENT = {"formula", "table", "figure", "noise", "meta", "caption"}
+
+# "Training." / "Datasets." — a run-in label is never longer than this.
+INLINE_LABEL_MAX = 30
+
+# A paragraph that stops after one of these words did not finish its sentence:
+# "… are conducted on" / "… performs comparably to the".
+FUNCTION_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "be",
+    "been",
+    "both",
+    "but",
+    "by",
+    "for",
+    "from",
+    "if",
+    "in",
+    "into",
+    "is",
+    "are",
+    "was",
+    "were",
+    "not",
+    "of",
+    "on",
+    "or",
+    "our",
+    "such",
+    "than",
+    "that",
+    "the",
+    "their",
+    "then",
+    "these",
+    "this",
+    "those",
+    "to",
+    "via",
+    "we",
+    "which",
+    "while",
+    "with",
+}
+
+
+def _is_dangling(text: str) -> bool:
+    """True when a paragraph clearly stops in the middle of its sentence.
+
+    Used as an extra signal for rejoining: pdfminer splits a sentence whenever a
+    display equation or a picture sits inside it, and the second half often
+    starts with a capital ("… of target views" / "(Itgt) to render …"), so the
+    "starts lowercase" test alone misses those.
+    """
+    stripped = text.rstrip()
+    if not stripped or stripped.endswith(SENTENCE_END):
+        return False
+    if stripped.endswith((",", "(", ")", "\u2013", "\u2014")):
+        return True
+    last_word = stripped.rsplit(" ", 1)[-1].strip(".,;:").lower()
+    if last_word in FUNCTION_WORDS:
+        return True
+    return len(stripped) > 120
+
+
+def _lift_inline_labels(segments: list[dict], vocab: set[str]) -> None:
+    """Rejoin a sentence that a run-in label was laid out in the middle of.
+
+    Papers set section labels inline at the start of a paragraph ("Training. We
+    present results of E-RayZer trained on both ..."), but a two-column layout
+    can emit that label as its own block between the two halves of the sentence:
+    "... We present results of E-RayZer" / "Datasets." / "trained on both ...".
+    The halves then became separate paragraphs, the second one starting with a
+    lowercase word. The label is moved out of the flow and the sentence rejoined.
+    """
+    index = 1
+    while index < len(segments) - 1:
+        label = segments[index]
+        before = segments[index - 1]
+        after = segments[index + 1]
+        text = label["text"].strip()
+        is_label = (
+            label.get("kind") == "body"
+            and 0 < len(text) <= INLINE_LABEL_MAX
+            and text.endswith(".")
+            # A label is a single capitalised word, not a short sentence.
+            and len(text.split()) <= 3
+            and text[:1].isupper()
+        )
+        if (
+            is_label
+            and before.get("kind") in {"body", "abstract"}
+            and after.get("kind") in {"body", "abstract"}
+            and not before["text"].rstrip().endswith(SENTENCE_END)
+            and re.match(r"^[a-z]", after["text"].lstrip())
+            and int(after.get("page") or 0) - int(before.get("page") or 0) in (0, 1)
+        ):
+            before_length = len(before["text"])
+            before["text"] = _join(before["text"], after["text"], vocab)
+            before["align"] = "merged"
+            if len(after["text"]) > before_length:
+                before["page"] = after["page"]
+                before["ordinal"] = after["ordinal"]
+                before["bbox"] = after["bbox"]
+            label["kind"] = "heading"
+            del segments[index + 1]
+        index += 1
+
+
+def _join_broken_segments(segments: list[dict], vocab: set[str]) -> list[dict]:
+    """Re-attach tails that a display equation, figure or page break interrupted.
+
+    Merging works line by line, so anything that sits *between* two parts of a
+    sentence — a formula, a table, a page boundary — separates them for good.
+    The result reads as broken paragraphs ("... to ensure conver-" followed by
+    "gence and scalability, we introduce ..."), and each half is translated on
+    its own, which is where fragments in the finished text come from.
+
+    Only a clear signal is used: the previous paragraph ends with a hyphen, or
+    the next one starts with a lowercase word while the previous did not close
+    its sentence. Prose is never joined across a caption, heading, table or
+    formula, and never across a paragraph that ended properly.
+    """
+    kept: list[dict] = []
+
+    def _previous_prose() -> int | None:
+        """Index of the nearest body paragraph, looking past an interruption."""
+        for index in range(len(kept) - 1, -1, -1):
+            if kept[index].get("kind") in {"body", "abstract"}:
+                return index
+            if kept[index].get("kind") not in CONTINUATION_TRANSPARENT:
+                return None
+        return None
+
+    for seg in segments:
+        prev = kept[-1] if kept else None
+        if prev is None:
+            kept.append(seg)
+            continue
+        joinable = (
+            prev.get("kind") in {"body", "abstract"}
+            and seg.get("kind") in {"body", "abstract"}
+            and int(seg.get("page") or 0) - int(prev.get("page") or 0) in (0, 1)
+        )
+        if not joinable and seg.get("kind") in {"body", "abstract"}:
+            # The sentence may continue after a formula or a picture that sits
+            # in between: "... refined via transformer" / [equation] /
+            # ", Linear(Iref, Rplk". Look for the paragraph that owns the tail.
+            index = _previous_prose()
+            if index is not None:
+                candidate = kept[index]
+                gap = int(seg.get("page") or 0) - int(candidate.get("page") or 0)
+                candidate_tail = candidate["text"].rstrip()
+                # "… the frozen-backbone setting, E-" / [table] / "RayZer …":
+                # a line broken mid-word names its own continuation, capital or
+                # not.
+                broken_word = candidate_tail.endswith("-")
+                # "…as follows:" / [equation] / "where K denotes …" — the colon
+                # introduces the equation, so the clause after it is the same
+                # paragraph even though a ":" looks like a sentence end.
+                open_after = (
+                    not candidate_tail.endswith(SENTENCE_END)
+                    or candidate_tail.endswith((":", "："))
+                )
+                if gap in (0, 1) and (
+                    broken_word
+                    or (open_after and re.match(r"^[a-z]", seg["text"].lstrip()))
+                ):
+                    prev = candidate
+                    joinable = True
+        if joinable:
+            previous_text = prev["text"].rstrip()
+            next_text = seg["text"].lstrip()
+            hyphenated = previous_text.endswith("-")
+            lowercase_tail = bool(re.match(r"^[a-z]", next_text))
+            open_sentence = not previous_text.endswith(SENTENCE_END)
+            # "The loss is:" / [equation] / "where Percep denotes ..." — the
+            # colon introduces the equation and the lowercase clause explains
+            # it, so they are one paragraph however the paper laid them out.
+            led_by_colon = previous_text.endswith((":", "："))
+            # The next half may start with a capital or a bracket when an
+            # equation was sitting in between, so fall back to the shape of the
+            # tail itself: a paragraph that stops at "the" or after a comma has
+            # not finished.
+            resumed = open_sentence and (
+                _is_dangling(previous_text) or next_text.startswith("(")
+            )
+            if (
+                hyphenated
+                or (lowercase_tail and (open_sentence or led_by_colon))
+                or resumed
+            ):
+                previous_length = len(prev["text"])
+                prev["text"] = _join(prev["text"], seg["text"], vocab)
+                prev["align"] = "merged"
+                # Keep the box where most of the text is, so a joined paragraph
+                # stays anchored to one place on one page.
+                if len(seg["text"]) > previous_length:
+                    prev["page"] = seg["page"]
+                    prev["ordinal"] = seg["ordinal"]
+                    prev["bbox"] = seg["bbox"]
+                continue
+        kept.append(seg)
+    return kept
 
 
 def parse_pdf(path: Path, title: str = "") -> dict:
@@ -746,6 +1086,12 @@ def parse_pdf(path: Path, title: str = "") -> dict:
     _mark_layout_fragments(merged_segments)
     # "2 Zhipu AI" looks like a section number; it is an affiliation.
     _mark_affiliations_as_meta(merged_segments)
+    # Last pass: paragraphs that a display equation, a figure or a page break
+    # interrupts leave a tail starting mid-sentence ("... to ensure conver-" /
+    # "gence and scalability") or a fragment starting with a lowercase word.
+    # Those were shown as separate paragraphs and translated as fragments.
+    _lift_inline_labels(merged_segments, vocab)
+    merged_segments = _join_broken_segments(merged_segments, vocab)
     # A caption plus the empty space next to it is a picture; the reading view
     # draws it from the page bitmap instead of pretending it does not exist.
     merged_segments = insert_figures(merged_segments, sizes)

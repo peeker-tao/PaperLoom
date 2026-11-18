@@ -102,6 +102,69 @@ automatically on the next open and tells you in the sidebar. Translations whose
 source text did not change are carried over (the response reports
 `keptTranslations`), so you only translate what actually changed.
 
+0.2.0 adds five more causes, all found by reading real coordinates rather than
+guessing:
+
+4. **One visual line split into two objects.** pdfminer sometimes emits the left
+   and right halves of a line separately; on E-RayZer page 2 that produced
+   `…operates directly in 3D space,` and `learning self-` at the same baseline
+   (`y = 401.84`), so a paragraph started in the middle of a word.
+5. **A paragraph that crosses the column break.** Bottom-of-left-column to
+   top-of-right-column has a huge vertical gap, so the two halves were never
+   joined.
+6. **An equation inside a sentence.** `"…as self-supervision:"` / `[equation]` /
+   `"where Percep denotes …"` — anything sitting between two halves of a
+   sentence used to separate them for good. The continuation is now searched for
+   past the interruption, and a colon counts as an opening tail because it is
+   what introduces an equation.
+7. **A run-in label laid out in the middle of a sentence.** `"…results of
+   E-RayZer"` / `"Datasets."` / `"trained on both …"`. The label is lifted out of
+   the flow and the sentence rejoined.
+8. **A heading swallowing the next paragraph**, because only the incoming line's
+   font size was checked.
+
+Also in 0.2.0: `E-RayZer` no longer becomes `E- RayZer`, `(cid:1)` glyph debris
+is no longer printed as a paragraph, and text containing a digit is no longer
+mistaken for table furniture (that bug hid whole paragraphs from the reading
+view). To confirm on your own PDF:
+
+```powershell
+python scripts/check_segmentation.py <paper>.pdf
+# prose length median=337  prose ends .,!?=60%  leftover hyphens=0
+```
+A high share of prose segments starting with a lowercase letter is the tell-tale
+sign of an unmerged continuation. On E-RayZer it went from 28 of 130 paragraphs
+to 2 of 86, and the median paragraph from 245 to 337 characters.
+
+A short line that ends a sentence is a legitimate paragraph end even if the next
+line is indented — the parser deliberately does not glue those together.
+
+## A figure says "图片需要回到 PDF 查看"
+
+Figure cropping used to run in the plugin with pdf.js, which is not reachable
+from the sidebar's iframe inside Zotero, so it always fell back to that text.
+Since 0.2.0 the service renders the page instead. Check the capability first:
+
+```powershell
+curl -H "X-PaperLoom-Token: $(Get-Content $env:APPDATA\PaperLoom\token)" `
+     http://127.0.0.1:23151/v1/status
+# capabilities: { "render": { "available": true } }
+```
+
+If `available` is `false`, the optional renderer is missing — reinstall the
+service dependencies:
+
+```powershell
+.\\.venv\\Scripts\\python.exe -m pip install pypdfium2 pillow
+```
+
+Then restart the service. The 自检 panel's **页面渲染（图片裁切）** step requests a
+real crop and reports the byte count, so you do not have to guess.
+
+Two related behaviours are intentional: only captions that pair with a real
+image region get a crop (an algorithm listing or a figure whose region touches
+prose is skipped), and tables stay as text in the flow — they are not cropped.
+
 ## Where do the translations go when I export?
 
 The sidebar's default view and both export paths use the same server-side
@@ -115,9 +178,9 @@ Markdown renderer, so what you read is what you copy:
 
 Options: `--original` / `--translation` (default: both), `--no-pages` to drop
 the `<!-- pN -->` markers, `--references` to include the bibliography (skipped
-by default because translating a reference list helps nobody). Figures,
-equations and table cells are not part of the text and do not appear in the
-Markdown — open the PDF page for those.
+by default because translating a reference list helps nobody). The sidebar's
+reading view shows figure crops inline, but the exported Markdown is text only —
+no image files are written, so equations and tables remain PDF-only.
 
 ## The Markdown has no Chinese
 

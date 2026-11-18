@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
+import { debug } from "../log";
 import type { ReaderController } from "../reader/controller";
 import { pageRect } from "./overlay";
 
 /** Rendered page width used for crops: enough detail for a figure, still fast. */
-const CROP_WIDTH = 1200;
+const CROP_WIDTH = 1400;
 
 /**
  * A picture cut out of the PDF page.
  *
  * The reading view is reflowed text, so figures cannot be laid out "in place".
- * Instead the page is rendered once (the controller caches it) and the region
- * belonging to the figure — computed by the service from the caption's box —
- * is cropped out of that bitmap. The result is the real picture: exact
- * colours, axes, sub-labels, everything a re-typeset SVG would lose.
+ * The service renders the region with pdfium and returns a PNG: that is the
+ * primary path, because it does not depend on the reader's internal pdf.js
+ * state (which is what used to leave every figure showing "图片需要回到 PDF
+ * 查看"). Cropping the reader's own bitmap stays as the fallback for when the
+ * service cannot render.
  */
 export function PageCrop(props: {
   controller: ReaderController;
@@ -22,15 +24,39 @@ export function PageCrop(props: {
   onOpen(): void;
 }): JSX.Element {
   const { controller, page, bbox, alt, onOpen } = props;
-  const [url, setUrl] = useState<string | null>(null);
+  const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const key = `${page}:${bbox.join(":")}`;
 
   useEffect(() => {
     let cancelled = false;
-    setUrl(null);
+    let objectUrl: string | null = null;
+    setSrc(null);
     setFailed(false);
-    void (async () => {
+
+    const fromService = async (): Promise<boolean> => {
+      const documentId = controller.state.document?.id;
+      if (!documentId) {
+        return false;
+      }
+      try {
+        const blob = await controller.client.pageImage(documentId, page, {
+          width: CROP_WIDTH,
+          bbox,
+        });
+        if (cancelled) {
+          return true;
+        }
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+        return true;
+      } catch (error) {
+        debug("figure render via service failed", page, String(error));
+        return false;
+      }
+    };
+
+    const fromReader = async (): Promise<void> => {
       const rendered = await controller.loadPageImage(page, CROP_WIDTH);
       if (cancelled) {
         return;
@@ -72,11 +98,21 @@ export function PageCrop(props: {
         canvas.height,
       );
       if (!cancelled) {
-        setUrl(canvas.toDataURL("image/png"));
+        setSrc(canvas.toDataURL("image/png"));
+      }
+    };
+
+    void (async () => {
+      if (!(await fromService())) {
+        await fromReader();
       }
     })();
+
     return () => {
       cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
     };
     // `key` covers page and bbox; the controller instance is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,17 +121,17 @@ export function PageCrop(props: {
   if (failed) {
     return (
       <button type="button" className="pl-md__figure-fallback" onClick={onOpen}>
-        图片需要回到 PDF 查看（无法渲染本页）
+        图片需要回到 PDF 查看（本页无法渲染）
       </button>
     );
   }
-  if (!url) {
+  if (!src) {
     return <div className="pl-md__figure-loading">正在截取原文图片…</div>;
   }
   return (
     <img
       className="pl-md__figure-img"
-      src={url}
+      src={src}
       alt={alt}
       title={`${alt} · 点击定位到 PDF 原页`}
       onClick={onOpen}

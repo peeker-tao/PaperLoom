@@ -11,7 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
@@ -52,6 +52,7 @@ from .models import (
 )
 from .pdf.babeldoc import engine_info
 from .pdf.extract import PARSER_VERSION, file_sha256, parse_pdf
+from .pdf.render import parse_bbox, render_available, render_page_png
 from .translate import document_id_for, is_translatable
 from .translation_config import TranslationConfig, evaluate
 from .urls import OFFICIAL_BASE_URL, check_base_url, normalize_base_url
@@ -273,6 +274,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 },
                 "fts5": True,
                 "vision": True,
+                "render": {"available": render_available()},
                 "alignment": "segment",
             },
             "activeJobs": manager().active_count(),
@@ -486,6 +488,54 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         state.doc_or_404(document_id)
         segments = state.db.get_segments(document_id, page)
         return {"segments": segments, "count": len(segments)}
+
+    @app.get("/v1/documents/{document_id}/page/{page}.png")
+    async def get_page_png(
+        document_id: str,
+        page: int,
+        width: int = 1400,
+        bbox: str | None = None,
+    ):
+        """A rendered page, or the ``bbox`` region of it, as PNG.
+
+        Figures belong to the page, not to the text stream, so the reading view
+        asks for the picture instead of trying to describe it. Rendering here
+        means it works regardless of the reader's pdf.js state.
+        """
+        doc = state.doc_or_404(document_id)
+        path = Path(doc.get("pdf_path", ""))
+        if not path.exists():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "file_missing", "message": "PDF 文件已被移动或删除"},
+            )
+        if not render_available():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "render_unavailable",
+                    "message": "服务端未安装图片渲染依赖（pypdfium2）",
+                },
+            )
+        try:
+            region = parse_bbox(bbox)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail={"code": "bad_bbox", "message": str(exc)}
+            ) from exc
+        try:
+            data = await asyncio.to_thread(
+                render_page_png, path, page, width=width, bbox=region
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail={"code": "render_failed", "message": str(exc)}
+            ) from exc
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
 
     @app.get("/v1/documents/{document_id}/markdown")
     async def get_markdown(
