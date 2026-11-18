@@ -120,7 +120,16 @@ export const SHADOW_CSS = `
 .pl-select, .pl-input, .pl-textarea {
   border: 1px solid var(--pl-border); background: var(--pl-panel); color: var(--pl-fg);
   border-radius: 6px; padding: 5px 8px; font-size: 12.5px; font-family: inherit; outline: none;
+  /* Inside Zotero the sidebar lives in a chrome-privileged document; without an
+     explicit focus policy a text field can look editable but refuse focus, and
+     nothing can be typed into it. */
+  -moz-user-focus: normal;
+  user-select: text;
+  pointer-events: auto;
+  cursor: text;
 }
+.pl-select { cursor: pointer; }
+.pl-textarea { caret-color: var(--pl-accent); }
 .pl-select:focus, .pl-input:focus, .pl-textarea:focus { border-color: #9dbfb6; box-shadow: 0 0 0 2px rgba(35,97,90,0.1); }
 .pl-composer { border-top: 1px solid var(--pl-border); padding: 8px 10px 10px; background: var(--pl-panel); }
 .pl-composer__row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }

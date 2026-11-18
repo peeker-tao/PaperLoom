@@ -6,6 +6,27 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-18
+
+### Fixed
+
+- **The question box could not be typed into inside Zotero.** The textarea's
+  value came straight from the shared store, so every keystroke depended on the
+  store echoing the new text back. When that round trip did not return — which
+  is what happens in the reader iframe — React restored the value it last saw
+  and the box behaved like it was read-only. The draft is now owned locally and
+  mirrored into the store, so typing sticks whether or not the echo arrives, and
+  the send button is driven by the same local value. Verified by deliberately
+  breaking the echo in the harness: text still types, Enter still sends.
+- Text fields explicitly take keyboard focus from the reader iframe
+  (`-moz-user-focus: normal`, plus a capture-phase `pointerdown` on the sidebar
+  that calls `iframeWindow.focus()`). In Zotero the sidebar lives inside that
+  iframe; if the main window keeps focus, clicks land but keys go to the item
+  list instead.
+- The first click and the first keystroke in the sidebar are logged once each.
+  Together with the service request log this answers the only question that
+  matters when a button "does nothing": did the event arrive at all?
+
 ## [0.1.6] - 2026-11-18
 
 ### Added

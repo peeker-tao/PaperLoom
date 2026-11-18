@@ -199,6 +199,25 @@ export class ReaderController {
     this.set({ error: null, notice: null });
   }
 
+  /**
+   * Make sure the reader iframe owns keyboard focus.
+   *
+   * Inside Zotero the sidebar lives in the reader iframe, which is embedded in
+   * chrome. When the main window keeps focus, keystrokes go to the item list
+   * instead of the textarea: the box looks selectable but nothing can be typed.
+   * Focusing the iframe window on interaction is cheap and fixes that.
+   */
+  ensureKeyboardFocus(): void {
+    try {
+      const win = this.reader?._iframeWindow;
+      if (win && !win.document?.hasFocus?.()) {
+        win.focus?.();
+      }
+    } catch (error) {
+      debug("focus failed", errorText(error));
+    }
+  }
+
   private notice(message: string): void {
     this.set({ notice: message });
     setTimeout(() => {

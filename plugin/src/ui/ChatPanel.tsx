@@ -1,7 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { debug } from "../log";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Usage } from "../types";
 import { Empty, MarkdownView, Spinner } from "./common";
+
+/** Report the first keystroke once: it separates "keys never arrive" from
+ * "keys arrive but the text does not stick". */
+let loggedKeystroke = false;
 
 function usageLabel(usage: Usage): string {
   const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
@@ -12,7 +17,38 @@ function usageLabel(usage: Usage): string {
 export function ChatPanel(props: { controller: ReaderController; state: UIState }): JSX.Element {
   const { controller, state } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const lastSent = useRef<string | null>(null);
+  const [draft, setDraft] = useState(state.composerDraft);
   const last = state.messages[state.messages.length - 1];
+
+  // The draft is owned locally and mirrored into the store. A controlled value
+  // straight from the store silently reverted keystrokes when the round trip did
+  // not come back (React restores the value it last saw), which made the box
+  // look read-only. Only an *external* change (e.g. "关于这段内容：" filled in by
+  // a quote action) overwrites what the user typed.
+  useEffect(() => {
+    if (state.composerDraft === lastSent.current) {
+      return;
+    }
+    setDraft(state.composerDraft);
+  }, [state.composerDraft]);
+
+  const update = (text: string) => {
+    setDraft(text);
+    lastSent.current = text;
+    controller.setComposerDraft(text);
+  };
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) {
+      return;
+    }
+    update("");
+    inputRef.current?.focus();
+    void controller.ask(text);
+  };
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -151,14 +187,28 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
           </div>
         ) : null}
         <textarea
+          ref={inputRef}
           className="pl-textarea"
           placeholder="就这篇论文提问，Enter 发送，Shift+Enter 换行"
-          value={state.composerDraft}
-          onChange={(event) => controller.setComposerDraft(event.target.value)}
+          value={draft}
+          onChange={(event) => update(event.target.value)}
+          onInput={(event) => {
+            // `onChange` in React is backed by `input`; handling it directly too
+            // costs nothing and survives the store being slow.
+            const value = (event.target as HTMLTextAreaElement).value;
+            if (value !== draft) {
+              update(value);
+            }
+          }}
+          onFocus={() => controller.ensureKeyboardFocus()}
           onKeyDown={(event) => {
+            if (!loggedKeystroke) {
+              loggedKeystroke = true;
+              debug("composer keystroke", event.key);
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              void controller.ask(state.composerDraft);
+              submit();
             }
           }}
         />
@@ -205,8 +255,8 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
               <button
                 type="button"
                 className="pl-btn pl-btn--primary"
-                disabled={!state.composerDraft.trim()}
-                onClick={() => void controller.ask(state.composerDraft)}
+                disabled={!draft.trim() || state.streaming}
+                onClick={() => submit()}
               >
                 发送
               </button>
