@@ -1,5 +1,6 @@
 import { errorText, debug, flush } from "../log";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
+import { probeComposer, probeFocus } from "../ui/probe";
 import type { ServiceClient } from "../service/client";
 import { ServiceError } from "../service/client";
 import type { ServiceManager } from "../service/manager";
@@ -565,6 +566,24 @@ export class ReaderController {
         throw new Error("pdf.js 没有返回页面位图");
       }
       return `${rendered.width}×${rendered.height} 像素`;
+    });
+
+    // Runs last: it inspects the rendered sidebar, so it reports what the user
+    // would actually click on rather than what the code intends.
+    await record("输入框可点击", async () => {
+      const probe = probeComposer(this);
+      if (!probe.ok) {
+        throw new Error(probe.detail);
+      }
+      return probe.detail;
+    });
+
+    await record("阅读器键盘焦点", async () => {
+      const probe = probeFocus(this);
+      if (!probe.ok) {
+        throw new Error(probe.detail);
+      }
+      return probe.detail;
     });
 
     flush();

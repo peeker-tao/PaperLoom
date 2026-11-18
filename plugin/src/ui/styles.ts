@@ -35,6 +35,10 @@ export const SHADOW_CSS = `
   border-left: 1px solid var(--pl-border);
   box-shadow: -6px 0 20px rgba(20, 30, 25, 0.07);
   pointer-events: auto;
+  /* Above the reading view: that layer carries z-index 6, so with "auto" here
+     it painted over the sidebar wherever the two overlapped — the sidebar then
+     looked covered by an invisible sheet and its fields could not be clicked. */
+  z-index: 10;
   transition: transform 0.18s ease;
 }
 .pl-sidebar.closed { transform: translateX(100%); }
@@ -131,7 +135,12 @@ export const SHADOW_CSS = `
 .pl-select { cursor: pointer; }
 .pl-textarea { caret-color: var(--pl-accent); }
 .pl-select:focus, .pl-input:focus, .pl-textarea:focus { border-color: #9dbfb6; box-shadow: 0 0 0 2px rgba(35,97,90,0.1); }
-.pl-composer { border-top: 1px solid var(--pl-border); padding: 8px 10px 10px; background: var(--pl-panel); }
+.pl-composer {
+  border-top: 1px solid var(--pl-border); padding: 8px 10px 10px; background: var(--pl-panel);
+  /* Keeps the composer above the message list's scroll shadows inside the
+     sidebar's own stacking context. */
+  position: relative; z-index: 2;
+}
 .pl-composer__row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .pl-textarea { width: 100%; min-height: 60px; max-height: 160px; resize: vertical; line-height: 1.5; }
 .pl-composer__bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }

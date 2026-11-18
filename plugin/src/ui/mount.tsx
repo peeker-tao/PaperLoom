@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { debug } from "../log";
 import type { ReaderController } from "../reader/controller";
 import { App } from "./App";
+import { registerSidebarRoot } from "./probe";
 import { SHADOW_CSS } from "./styles";
 
 const HOST_CSS = `
@@ -9,7 +10,9 @@ const HOST_CSS = `
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 2147483000;
+  /* Highest value an engine honours: nested layering contexts in Zotero's
+     reader must not be able to sit above the sidebar. */
+  z-index: 2147483647;
 }
 body.paperloom-sidebar-open #split-view,
 body.paperloom-sidebar-open #reader-ui {
@@ -32,13 +35,29 @@ export function mountController(controller: ReaderController, doc: Document): ()
   }
   const host = doc.createElement("div");
   host.id = "paperloom-host";
-  doc.body.appendChild(host);
+  // Inline the properties that decide hit-testing. The stylesheet above can
+  // lose to a Zotero rule with higher specificity, and a host that ends up
+  // without `pointer-events: none` would swallow every click meant for the PDF.
+  host.style.cssText = [
+    "position:fixed",
+    "top:0",
+    "left:0",
+    "right:0",
+    "bottom:0",
+    "pointer-events:none",
+    "z-index:2147483647",
+  ].join(";");
+  // Appended to <html> rather than <body>: if Zotero's reader puts a stacking
+  // context (transform / z-index) on <body>, a huge z-index inside it would be
+  // confined to that context and could still be covered.
+  (doc.documentElement || doc.body).appendChild(host);
   const shadow = host.attachShadow({ mode: "open" });
   const shadowStyle = doc.createElement("style");
   shadowStyle.textContent = SHADOW_CSS;
   shadow.appendChild(shadowStyle);
   const container = doc.createElement("div");
   shadow.appendChild(container);
+  registerSidebarRoot(controller, container);
   const root = createRoot(container);
   root.render(<App controller={controller} />);
 
@@ -59,6 +78,16 @@ export function mountController(controller: ReaderController, doc: Document): ()
     }
     if (tag === "input" || tag === "textarea" || tag === "select") {
       controller.ensureKeyboardFocus();
+      // Focus the field itself as well: `iframeWindow.focus()` only makes the
+      // document eligible for keys, it does not move the caret into the field.
+      const field = target as HTMLInputElement | HTMLTextAreaElement | null;
+      setTimeout(() => {
+        try {
+          field?.focus();
+        } catch {
+          // Element may be gone; nothing to do.
+        }
+      }, 0);
     }
   };
   container.addEventListener("pointerdown", onPointerDown, true);

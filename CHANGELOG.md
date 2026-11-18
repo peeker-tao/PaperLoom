@@ -6,6 +6,32 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-18
+
+### Fixed
+
+- **A transparent layer could cover the sidebar.** `.pl-sidebar` had
+  `z-index: auto` while the reading layer had `z-index: 6`, so wherever the two
+  overlapped the reading view painted on top — the fields below it looked
+  covered by invisible glass and could not be clicked. The sidebar is now
+  explicitly above it, and the composer sits in its own layer inside the sidebar.
+- The host element is appended to `<html>` instead of `<body>`, and carries its
+  hit-testing properties inline (`position`, `inset`, `pointer-events`,
+  `z-index: 2147483647`). If Zotero's reader puts a stacking context or a
+  higher-specificity rule on `<body>`, a large `z-index` inside it would be
+  confined to that context and could still be covered by a sibling.
+- Clicking a text field now focuses the field itself, not just the reader
+  iframe: `iframeWindow.focus()` makes the document eligible for keys but does
+  not move the caret into the input.
+
+### Added
+
+- `ui/probe.ts` and two new self-test steps — **输入框可点击** and **阅读器键盘焦点**.
+  The first walks `elementFromPoint` down through shadow roots and names the
+  element that actually receives the pointer, so "有一层东西挡住" becomes a
+  concrete element name instead of a guess. The second reports whether the
+  reader document owns the keyboard.
+
 ## [0.1.7] - 2026-11-18
 
 ### Fixed
