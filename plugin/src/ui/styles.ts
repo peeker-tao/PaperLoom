@@ -213,15 +213,18 @@ export const SHADOW_CSS = `
 }
 .pl-page-img { display: block; width: 100%; height: 100%; user-select: none; }
 .pl-seg-overlay {
-  position: absolute; display: block; margin: 0; padding: 0 1px; overflow: hidden;
+  position: absolute; display: block; margin: 0; padding: 1px 1px 0; overflow: hidden;
   border: 0; border-radius: 2px; text-align: left; cursor: pointer;
   font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  color: #14181b; background: rgba(253, 252, 248, 0.93);
-  box-shadow: 0 0 0 1px rgba(45, 106, 79, 0.14);
-  user-select: text; word-break: break-word; white-space: normal;
+  color: #14181b;
+  /* Opaque: a translucent panel lets the English show through and makes the
+     page look like it has doubled text. */
+  background: #fffdf8;
+  box-shadow: 0 0 0 1px rgba(45, 106, 79, 0.18);
+  user-select: text; white-space: nowrap;
 }
+.pl-seg-overlay__line { display: block; white-space: pre; }
 .pl-seg-overlay:hover { background: #fff; box-shadow: 0 0 0 1px var(--pl-accent); z-index: 3; }
-.pl-seg-overlay.untranslated { background: transparent; box-shadow: none; cursor: default; }
 .pl-seg-overlay.highlight { background: var(--pl-accent-weak); box-shadow: 0 0 0 2px var(--pl-accent); z-index: 4; }
 .pl-seg-box { position: absolute; border-radius: 2px; pointer-events: none; }
 .pl-seg-box.highlight { background: rgba(45, 106, 79, 0.16); box-shadow: 0 0 0 2px var(--pl-accent); }

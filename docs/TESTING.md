@@ -8,15 +8,15 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 131 passed in ~9s
+# 136 passed in ~9s
 
 .\.venv\Scripts\python.exe -m ruff check service scripts
 # All checks passed!
 
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
-node test/overlay.test.mjs                      # 8 passed
-node esbuild.config.mjs                         # content/plugin.js ~243 KB, content/prefs.js ~17 KB
+node test/overlay.test.mjs                      # 13 passed
+node esbuild.config.mjs                         # content/plugin.js ~245 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
@@ -34,11 +34,15 @@ node esbuild.config.mjs                         # content/plugin.js ~243 KB, con
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
 | `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
 
-### 插件侧（8 项）
+### 插件侧（13 项）
 
-`plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node --test` 运行，
-覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高、过小框拒绝、逆序/畸形 bbox 拒绝、
-旋转页拒绝、越界框拒绝、`fitPage` 保持宽高比。
+`plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
+覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
+旋转页拒绝、越界框拒绝、**整页 bbox 拒绝**（跨页合并 bug 的回归）、空译文跳过、
+**拉丁词不断行**、**行首禁则标点**、字号收缩到不可行时放弃、`fitPage` 宽高比。
+
+`service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
+同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。
 
 ## 真实 API 验证（DeepSeek）
 
@@ -129,6 +133,30 @@ DST: 摘要。近期文本到图像生成系统的进展在很大程度上由扩
 `scripts/preview_overlay.py` 可生成同时含原页与译文叠层的独立 HTML，用于人工视觉核对；
 注意 VS Code 内置浏览器无法完成 pdf.js 画布渲染（页面空白是该环境限制），
 请用桌面浏览器打开。
+
+### 叠层渲染的可视化核对（无需 Zotero、无需浏览器）
+
+```powershell
+.\.venv\Scripts\python.exe scripts\preview_overlay_png.py --document-id <id> --pages 1,3
+# page 1: 6/13 segments translated, 6 overlays drawn, 0 skipped
+# -> %TEMP%\paperloom-preview\page-1.png
+```
+
+该脚本用 pdfium 栅格化真实页面，再用与插件**完全相同**的规则
+（`scripts/overlay_layout.py` ↔ `plugin/src/ui/overlay.ts`）把译文画进原段落框，
+因此图中所见即插件所示。实测（CogView3 第 1/3 页）：
+
+| 检查点 | 结果 |
+| --- | --- |
+| 英文/作者块/页边水印 | 保持原样，不被译文覆盖 |
+| 公式 (1)(2) | 原样保留，未参与翻译 |
+| 段落译文 | 填满原段落区域（字号自适应，无裁断） |
+| 拉丁词/数字 | 不在词中间断行（`CogView3`、`77.0%` 完整） |
+| 行首标点 | 无（行首禁则） |
+| 整页白框 | 无（跨页合并 bbox 已修，另有 70% 页高防御） |
+
+真实 API 全文任务：96/99 段、22510 prompt / 7312 completion token、约 $0.0155，
+质量标记 0/96 命中。
 
 ## Zotero 实测
 

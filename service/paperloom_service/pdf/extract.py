@@ -21,7 +21,9 @@ log = logging.getLogger("paperloom.pdf")
 
 # Bump whenever segmentation output changes: documents parsed by an older
 # version are transparently re-parsed (their segment ids no longer match).
-PARSER_VERSION = 2
+# v3: cross-page continuation keeps a single-page bbox; rotated stamps filtered;
+#     references/equations/table cells classified.
+PARSER_VERSION = 3
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
@@ -627,6 +629,13 @@ def parse_pdf(path: Path, title: str = "") -> dict:
             segments.append(seg)
 
     # Merge paragraphs that continue across a page break.
+    #
+    # The text is joined so the translation is a complete sentence, but the
+    # bounding box must stay inside ONE page: mixing the coordinates of two
+    # pages produces a box covering the whole sheet, which the bilingual view
+    # would paint over the entire page (hiding figures and every other
+    # paragraph). The part holding more text keeps the box, so the translation
+    # is drawn where most of the paragraph actually is.
     merged_segments: list[dict] = []
     for seg in segments:
         prev = merged_segments[-1] if merged_segments else None
@@ -638,14 +647,13 @@ def parse_pdf(path: Path, title: str = "") -> dict:
             and prev["kind"] in {"body", "abstract"}
             and seg["kind"] in {"body", "abstract"}
         ):
+            carried = len(prev["text"])
             prev["text"] = _join(prev["text"], seg["text"], vocab)
-            prev["bbox"] = [
-                min(prev["bbox"][0], seg["bbox"][0]),
-                prev["bbox"][1],
-                max(prev["bbox"][2], seg["bbox"][2]),
-                seg["bbox"][3],
-            ]
             prev["align"] = "merged"
+            if len(seg["text"]) > carried:
+                prev["page"] = seg["page"]
+                prev["ordinal"] = seg["ordinal"]
+                prev["bbox"] = seg["bbox"]
             continue
         merged_segments.append(seg)
 

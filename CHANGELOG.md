@@ -52,9 +52,31 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `scripts/check_segmentation.py` (paragraph/merge quality report) and
+- `scripts/check_segmentation.py` (paragraph/merge quality report),
   `scripts/check_translation_quality.py` (runs a real job and prints
-  source/translation pairs with quality flags).
+  source/translation pairs with quality flags), `scripts/preview_overlay_png.py`
+  (renders the bilingual view to a PNG offline) and `scripts/overlay_layout.py`
+  (the shared text-fitting rules).
+
+### Fixed (bilingual overlay rendering)
+
+- **A cross-page paragraph produced a page-sized box.** Merging a paragraph that
+  continues onto the next page mixed the coordinates of both pages, so the box
+  covered the whole sheet and the opaque panel painted over figures and every
+  other paragraph. The text is still joined (one complete sentence), but the box
+  now stays on the page holding most of it, and any box taller than 70% of the
+  page is rejected as a safety net.
+- Overlay panels are opaque. At 93% opacity the English showed through and the
+  page looked like it had doubled text.
+- The translation is now fitted to its box: the largest font size at which the
+  whole paragraph fits is chosen (down to 5px), instead of a fixed size that
+  clipped the tail of long paragraphs. If nothing fits, the overlay is skipped
+  rather than showing a truncated sentence.
+- Lines are wrapped with the same rules as the offline preview: Latin words and
+  numbers are never split (`C / ogView3`), and closing punctuation never starts
+  a line (CJK typesetting rule).
+- Text is top-aligned to the paragraph start instead of floating in the middle
+  of the box.
 
 ## [0.1.2] - 2026-11-17
 

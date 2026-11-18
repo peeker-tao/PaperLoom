@@ -185,3 +185,22 @@ def test_every_document_records_its_parser_version(tmp_path):
 
     doc = parse_pdf(paginated_paper_pdf(tmp_path / "p.pdf"))
     assert doc["parser_version"] == PARSER_VERSION
+
+
+def test_cross_page_merge_keeps_a_single_page_bbox(tmp_path):
+    """Regression: mixing the coordinates of two pages produced a page-size box.
+
+    The bilingual view paints an opaque panel into the box, so such a segment
+    covered the whole sheet — figures and every other paragraph disappeared.
+    """
+    from paperloom_service.pdf.extract import parse_pdf
+
+    doc = parse_pdf(paper_pdf(tmp_path / "p.pdf", pages=2))
+    page_heights = {}
+    for segment in doc["segments"]:
+        _x0, y0, _x1, y1 = segment["bbox"]
+        assert y1 > y0, segment
+        # A paragraph occupies a portion of one page, never most of it.
+        assert (y1 - y0) <= 0.7 * 792, (segment["id"], segment["bbox"])
+        page_heights.setdefault(segment["page"], []).append(y1)
+    assert page_heights

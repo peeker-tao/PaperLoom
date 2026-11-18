@@ -328,14 +328,26 @@ function PageStage(props: {
                 key={segment.id}
                 type="button"
                 className={`pl-seg-overlay${isActive ? " highlight" : ""}`}
-                style={style}
+                style={{
+                  left: style.left,
+                  top: style.top,
+                  width: style.width,
+                  height: style.height,
+                  fontSize: style.fontSize,
+                  lineHeight: style.lineHeight,
+                }}
                 title={segment.translation || segment.text}
                 onClick={() => {
                   onPick(segment.id);
                   controller.jumpToSegment(segment.id);
                 }}
               >
-                {segment.translation}
+                {/* Pre-wrapped so the plugin and the Python preview agree. */}
+                {style.lines.map((line, index) => (
+                  <span key={index} className="pl-seg-overlay__line">
+                    {line}
+                  </span>
+                ))}
               </button>
             );
           })}
@@ -355,7 +367,13 @@ function PageStage(props: {
             if (!style) {
               return null;
             }
-            return <div key={segment.id} className="pl-seg-box highlight" style={style} />;
+            return (
+              <div
+                key={segment.id}
+                className="pl-seg-box highlight"
+                style={{ left: style.left, top: style.top, width: style.width, height: style.height }}
+              />
+            );
           })}
       </div>
     </div>
