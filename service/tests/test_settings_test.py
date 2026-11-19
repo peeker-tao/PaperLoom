@@ -28,7 +28,9 @@ async def test_test_connection_uses_the_typed_base_url(client):
 
 
 async def test_test_connection_rejects_a_malformed_base_url(client):
-    response = await client.post("/v1/settings/test", json={"baseUrl": "ftp://example.com"})
+    response = await client.post(
+        "/v1/settings/test", json={"baseUrl": "ftp://example.com"}
+    )
     body = response.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "bad_base_url"
@@ -46,7 +48,9 @@ async def test_test_connection_reports_the_saved_key_path(client):
 async def test_test_connection_flags_a_typed_key_without_saving_it(client):
     before = (await client.get("/v1/settings")).json()["apiKey"]
     body = (
-        await client.post("/v1/settings/test", json={"apiKey": "sk-typed-not-saved-000"})
+        await client.post(
+            "/v1/settings/test", json={"apiKey": "sk-typed-not-saved-000"}
+        )
     ).json()
     # The fake LLM accepts any key, so this succeeds — but it must say it used the
     # typed one, and the stored key must be untouched afterwards.
@@ -58,7 +62,9 @@ async def test_test_connection_flags_a_typed_key_without_saving_it(client):
 
 
 async def test_test_connection_rejects_an_unknown_model(client):
-    body = (await client.post("/v1/settings/test", json={"model": "not-a-model"})).json()
+    body = (
+        await client.post("/v1/settings/test", json={"model": "not-a-model"})
+    ).json()
     assert body["ok"] is False
 
 

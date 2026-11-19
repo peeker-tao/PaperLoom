@@ -252,6 +252,137 @@ export const SHADOW_CSS = `
 }
 .pl-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
 .pl-chip button { border: none; background: transparent; cursor: pointer; color: inherit; font-size: 12px; }
+/* ---- select / segmented ------------------------------------------------ */
+/* Dropdown built inside the shadow root. The native select's popup is drawn by
+   the platform, so it cannot be centred on the trigger, cannot carry a second
+   line of explanation, and can open off-screen in a narrow sidebar. */
+.pl-dd { position: relative; flex: 0 0 auto; max-width: 100%; }
+.pl-dd__trigger {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+  height: 26px; padding: 0 7px; border-radius: 6px;
+  border: 1px solid var(--pl-border); background: var(--pl-panel); color: var(--pl-fg-soft);
+  font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.pl-dd__trigger:hover { border-color: #cdc9bb; background: #fbfaf6; }
+.pl-dd__trigger.active { border-color: var(--pl-accent); box-shadow: 0 0 0 2px var(--pl-accent-ring); }
+.pl-dd__trigger:focus-visible { outline: none; border-color: var(--pl-accent); box-shadow: 0 0 0 2px var(--pl-accent-ring); }
+.pl-dd__text { overflow: hidden; text-overflow: ellipsis; max-width: 148px; }
+.pl-dd--compact .pl-dd__text { max-width: 104px; }
+.pl-dd__caret { font-size: 9px; color: var(--pl-faint); flex: 0 0 auto; }
+.pl-dd__list {
+  position: absolute; z-index: 40; margin: 0; padding: 4px;
+  /* Wider than the trigger on purpose: the closed trigger only has to show the
+     current choice, while the list has to show every name plus its badge. It
+     grows to the right of the trigger, which is the left end of the composer
+     row, so there is room. */
+  left: 0; right: auto; min-width: 208px; max-width: min(268px, calc(100vw - 24px));
+  max-height: 232px; overflow-y: auto;
+  list-style: none; background: var(--pl-panel);
+  border: 1px solid var(--pl-border); border-radius: var(--pl-radius);
+  box-shadow: var(--pl-shadow-3);
+}
+.pl-dd__list--down { top: calc(100% + 4px); }
+/* The composer lives at the bottom of the panel, so its menus open upwards;
+   a downward list would be pushed past the viewport. */
+.pl-dd__list--up { bottom: calc(100% + 4px); }
+.pl-dd__option {
+  display: block; width: 100%; text-align: left; padding: 5px 7px;
+  border: none; border-radius: var(--pl-radius-sm); background: transparent;
+  color: var(--pl-fg); font: inherit; font-size: 12px; cursor: pointer;
+}
+.pl-dd__option:hover:not(:disabled) { background: var(--pl-accent-weak); }
+.pl-dd__option.active,
+.pl-dd__option.active:hover:not(:disabled) { background: #eef4f1; }
+.pl-dd__option:disabled { cursor: not-allowed; color: var(--pl-faint); }
+.pl-dd__row { display: flex; align-items: center; gap: 6px; }
+.pl-dd__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-dd__badge {
+  flex: 0 0 auto; font-size: 10px; padding: 0 4px; border-radius: 4px;
+  background: #eef1ea; color: #6b716c; letter-spacing: 0.2px;
+}
+.pl-dd__check { flex: 0 0 auto; color: var(--pl-accent); font-size: 11px; }
+.pl-dd__hint { display: block; font-size: 10.5px; color: var(--pl-faint); margin-top: 1px; line-height: 1.35; }
+/* Three visible choices instead of a dropdown: fewer clicks, and an unavailable
+   one can say why on hover instead of silently refusing. */
+.pl-seg {
+  display: inline-flex; flex: 0 0 auto; padding: 1px; gap: 1px;
+  border: 1px solid var(--pl-border); border-radius: 7px; background: #f4f2ec;
+}
+.pl-seg__item {
+  border: none; background: transparent; color: var(--pl-fg-soft);
+  font: inherit; font-size: 11.5px; padding: 3px 7px; border-radius: 5px;
+  cursor: pointer; white-space: nowrap;
+}
+.pl-seg__item:hover:not(:disabled) { background: #eae7de; }
+/* Same reason as the page grid: hover must not dim the selected segment. */
+.pl-seg__item.active,
+.pl-seg__item.active:hover:not(:disabled) { background: var(--pl-panel); color: var(--pl-accent); font-weight: 600; box-shadow: var(--pl-shadow-1); }
+.pl-seg__item:disabled { color: var(--pl-faint); cursor: not-allowed; }
+.pl-seg__item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pl-accent-ring); }
+/* ---- selection toolbar ------------------------------------------------- */
+/* A fixed anchor that never eats clicks (pointer-events on the bar only), so
+   the whole sidebar stays usable while a selection is being hovered. */
+.pl-selhost { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+.pl-seltool {
+  position: fixed; pointer-events: auto; display: flex; align-items: center; gap: 4px;
+  max-width: min(92%, 460px); padding: 3px 4px 3px 8px;
+  background: #22262b; color: #f2f1ec;
+  border-radius: 8px; box-shadow: 0 8px 22px rgba(0,0,0,.28);
+  font-size: 11.5px;
+}
+.pl-seltool__text {
+  max-width: 168px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #cfd4d0; padding-right: 4px;
+}
+.pl-seltool__btn {
+  border: none; background: transparent; color: #f2f1ec;
+  font: inherit; font-size: 11.5px; padding: 3px 7px; border-radius: 5px; cursor: pointer;
+  white-space: nowrap;
+}
+.pl-seltool__btn:hover { background: rgba(255,255,255,.16); }
+.pl-seltool__close {
+  border: none; background: transparent; color: #a9b0ac;
+  font-size: 11px; padding: 3px 5px; border-radius: 5px; cursor: pointer;
+}
+.pl-seltool__close:hover { background: rgba(255,255,255,.12); color: #fff; }
+/* ---- page grid (translate dialog) -------------------------------------- */
+.pl-pagegrid__head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin: 12px 0 4px;
+}
+.pl-pagegrid__key {
+  display: inline-block; width: 7px; height: 7px; border-radius: 999px;
+  background: var(--pl-accent); opacity: 0.55; margin-right: 4px; vertical-align: middle;
+}
+.pl-pagegrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 4px; max-height: 208px; overflow-y: auto; padding: 2px;
+  border: 1px solid var(--pl-border-soft); border-radius: var(--pl-radius-sm);
+  background: #fbfaf6; scrollbar-width: thin;
+}
+.pl-pagegrid__cell {
+  position: relative; height: 28px; padding: 0; border-radius: 5px;
+  border: 1px solid var(--pl-border); background: var(--pl-panel);
+  color: var(--pl-fg-soft); font: inherit; font-size: 11.5px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.pl-pagegrid__cell:hover:not(:disabled) { border-color: #c9c5b6; background: #f7f6f1; }
+/* The selected tile is the one thing that must always be legible. :hover carries
+   an extra pseudo-class, so it outranks .active on the tile the mouse is still
+   resting on — which made a just-clicked page look disabled. */
+.pl-pagegrid__cell.active,
+.pl-pagegrid__cell.active:hover:not(:disabled) {
+  background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; font-weight: 600;
+}
+.pl-pagegrid__cell:disabled { opacity: 0.5; cursor: not-allowed; }
+.pl-pagegrid__cell:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--pl-accent-ring); }
+/* Already translated: a small dot, so re-translating is a visible choice rather
+   than an invisible charge. */
+.pl-pagegrid__cell.done::after {
+  content: ""; position: absolute; top: 3px; right: 3px;
+  width: 4px; height: 4px; border-radius: 999px; background: var(--pl-accent); opacity: 0.65;
+}
+.pl-pagegrid__cell.active.done::after { background: #fff; opacity: 0.9; }
 /* ---- attachments ------------------------------------------------------- */
 /* A row of thumbnails above the textarea. They stay small and horizontal so a
    four-image question does not push the textarea off the screen. */

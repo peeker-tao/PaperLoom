@@ -31,6 +31,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "plugin composer tests failed" }
     node test/attachments.test.mjs
     if ($LASTEXITCODE -ne 0) { throw "plugin attachment tests failed" }
+    node test/selection.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw "plugin selection tests failed" }
     node esbuild.config.mjs
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
   }

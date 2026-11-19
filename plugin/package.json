@@ -7,7 +7,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node test/overlay.test.mjs && node test/jump.test.mjs && node test/model.test.mjs && node test/pages.test.mjs && node test/composer.test.mjs && node test/attachments.test.mjs"
+    "test:unit": "node test/overlay.test.mjs && node test/jump.test.mjs && node test/model.test.mjs && node test/pages.test.mjs && node test/composer.test.mjs && node test/attachments.test.mjs && node test/selection.test.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

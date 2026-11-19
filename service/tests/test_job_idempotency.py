@@ -65,7 +65,9 @@ async def test_a_different_document_is_untouched(manager: JobManager):
 async def test_retry_still_creates_a_new_job(manager: JobManager):
     """`retry` must not be swallowed by the guard — that is the whole point of it."""
     first = manager.create_translation_job(DOC, pages=[1], attach_existing=True)
-    forced = manager.create_translation_job(DOC, pages=[1], force=True, attach_existing=False)
+    forced = manager.create_translation_job(
+        DOC, pages=[1], force=True, attach_existing=False
+    )
     assert forced["id"] != first["id"]
 
 

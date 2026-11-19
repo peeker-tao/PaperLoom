@@ -203,7 +203,12 @@ def _crop_box(
     elif turned == 180:
         left, top, right, bottom = page_width - x1, y0, page_width - x0, y1
     elif turned == 270:
-        left, top, right, bottom = page_height - y1, page_width - x1, page_height - y0, page_width - x0
+        left, top, right, bottom = (
+            page_height - y1,
+            page_width - x1,
+            page_height - y0,
+            page_width - x0,
+        )
     else:
         left, top, right, bottom = x0, page_height - y1, x1, page_height - y0
     return (

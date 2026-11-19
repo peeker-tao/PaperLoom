@@ -7,6 +7,7 @@ import { ChatPanel } from "./ChatPanel";
 import { GlossaryPanel } from "./GlossaryPanel";
 import { JobBanner } from "./JobBanner";
 import { NotesPanel } from "./NotesPanel";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { SettingsPanel } from "./SettingsPanel";
 import { TranslateDialog } from "./TranslateDialog";
 import { IconButton, Modal } from "./common";
@@ -125,6 +126,10 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
       ) : null}
 
       <BilingualView controller={controller} state={state} />
+
+      {/* One handler for every selection made anywhere in the sidebar: reading
+          view, page overlay, notes. There used to be none for the reading view. */}
+      <SelectionToolbar controller={controller} state={state} />
 
       {state.canReturnToTranslation && !state.bilingualOpen ? (
         <button
@@ -277,11 +282,11 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
               <button
                 type="button"
                 className="pl-btn pl-btn--ghost"
-                title={blockedReason || "输入页码范围，例如 1-3,5"}
+                title={blockedReason || "选择要翻译的页（可点选页码）"}
                 disabled={Boolean(blockedReason)}
                 onClick={() => controller.openTranslateDialog(true)}
               >
-                页码…
+                选页…
               </button>
               <button
                 type="button"

@@ -26,7 +26,7 @@ await esbuild.build({
   outfile: bundle,
   logLevel: "silent",
 });
-const { parsePageInput, describePages } = await import(pathToFileURL(bundle).href);
+const { parsePageInput, describePages, formatPageInput } = await import(pathToFileURL(bundle).href);
 
 let failures = 0;
 function test(name, fn) {
@@ -78,6 +78,25 @@ test("describePages collapses runs", () => {
   assert.equal(describePages([1, 2, 3, 5]), "1-3, 5（共 4 页）");
   assert.equal(describePages([7]), "7（共 1 页）");
   assert.equal(describePages([]), "全文");
+});
+
+// The page grid writes back into the text field. If that round trip disagreed
+// with the parser, clicking pages 4 and 5 would silently translate something
+// else — so the two directions are checked against each other.
+test("formatPageInput collapses runs into the input syntax", () => {
+  assert.equal(formatPageInput([1, 2, 3, 5]), "1-3,5");
+  assert.equal(formatPageInput([7]), "7");
+  assert.equal(formatPageInput([]), "");
+});
+
+test("formatting and parsing are inverses", () => {
+  for (const pages of [[1], [1, 2, 3, 5], [4, 5, 6, 10, 11], [1, 2, 4, 8]]) {
+    assert.deepEqual(parsePageInput(formatPageInput(pages)).pages, pages);
+  }
+});
+
+test("formatPageInput sorts and de-duplicates before collapsing", () => {
+  assert.equal(formatPageInput([3, 1, 2, 2]), "1-3");
 });
 
 rmSync(outDir, { recursive: true, force: true });

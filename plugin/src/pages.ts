@@ -50,6 +50,33 @@ export function parsePageInput(input: string): ParseResult {
 }
 
 /**
+ * Format pages back into the compact input form, e.g. "1-3,5".
+ *
+ * Used by the page grid: clicking tiles has to update the text field, and
+ * pasting a computed list of 200 numbers into it would be unreadable.
+ */
+export function formatPageInput(pages: number[]): string {
+  const sorted = Array.from(new Set(pages.filter((page) => page >= 1))).sort((a, b) => a - b);
+  if (!sorted.length) {
+    return "";
+  }
+  const runs: string[] = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  for (const page of sorted.slice(1)) {
+    if (page === previous + 1) {
+      previous = page;
+      continue;
+    }
+    runs.push(start === previous ? String(start) : `${start}-${previous}`);
+    start = page;
+    previous = page;
+  }
+  runs.push(start === previous ? String(start) : `${start}-${previous}`);
+  return runs.join(",");
+}
+
+/**
  * Turn a parsed range into a human summary, e.g. "1-3, 5（共 4 页）".
  *
  * Consecutive pages are collapsed so a 200-page selection does not produce a

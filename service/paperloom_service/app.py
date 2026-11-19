@@ -112,9 +112,8 @@ def image_problem(urls: list[str]) -> str | None:
         header, _, payload = url.partition(",")
         mime = header[len("data:") :].split(";")[0].lower()
         if mime not in ALLOWED_IMAGE_MIMES:
-            return (
-                f"第 {index} 张图片格式为 {mime or '未知'}，只支持 "
-                + "、".join(m.replace("image/", "").upper() for m in ALLOWED_IMAGE_MIMES)
+            return f"第 {index} 张图片格式为 {mime or '未知'}，只支持 " + "、".join(
+                m.replace("image/", "").upper() for m in ALLOWED_IMAGE_MIMES
             )
         size = len(payload) * 3 // 4
         total += size
@@ -152,7 +151,6 @@ def attach_images(messages: list[dict], urls: list[str], captions: list[str]) ->
     messages[index] = {"role": "user", "content": parts}
 
 
-
 def require_supported_model(model: str | None, *, field: str = "model") -> None:
     """Reject a model this service does not offer, naming the alternatives."""
     if not model:
@@ -181,9 +179,7 @@ def redact_secrets(text: str) -> str:
     if not text:
         return text
     # Authorization: Bearer <token>  /  x-api-key: <token>
-    text = re.sub(
-        r"(?i)(authorization\s*:\s*bearer\s+)\S+", r"\1***", text
-    )
+    text = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)\S+", r"\1***", text)
     text = re.sub(r"(?i)(x-api-key\s*:\s*)\S+", r"\1***", text)
     # Bare DeepSeek-style keys.
     text = re.sub(r"\bsk-[A-Za-z0-9_\-]{8,}", "sk-***", text)

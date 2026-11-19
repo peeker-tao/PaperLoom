@@ -6,6 +6,7 @@ import { debug } from "../log";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Usage } from "../types";
 import { Empty, MarkdownView, Spinner } from "./common";
+import { Segmented, Select } from "./Select";
 
 /** Report the first keystroke once: it separates "keys never arrive" from
  * "keys arrive but the text does not stick". */
@@ -395,35 +396,44 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
             >
               + 图片
             </button>
-            <select
-              className="pl-select"
+            <Segmented
+              label="上下文范围"
               value={state.scope}
-              onChange={(event) => controller.setScope(event.target.value as any)}
-              title="上下文范围"
-            >
-              <option value="selection" disabled={!state.selection}>
-                当前选区
-              </option>
-              <option value="section">当前章节</option>
-              <option value="paper">整篇论文</option>
-            </select>
+              onChange={(scope) => controller.setScope(scope as any)}
+              options={[
+                {
+                  value: "selection",
+                  label: "选区",
+                  title: state.selection
+                    ? `只基于选中的这段（第 ${state.selection.page} 页）`
+                    : "先在侧边栏里选中一段文字，或点段落右侧的「解释」——没有选区时用不了",
+                  disabled: !state.selection,
+                },
+                { value: "section", label: "章节", title: "基于当前位置所在的小节" },
+                { value: "paper", label: "全文", title: "基于整篇论文（上下文最大）" },
+              ]}
+            />
             {state.models.length ? (
-              <select
-                className="pl-select"
+              <Select
+                compact
+                placement="up"
+                label="问答模型（只影响提问；翻译与分析各用设置里的模型）"
                 value={state.model}
-                title="问答模型（只影响提问；翻译与分析各用设置里的模型）"
-                aria-label="问答模型"
-                onChange={(event) => controller.setModel(event.target.value)}
-              >
-                {state.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label ? `${model.label}` : model.id}
-                  </option>
-                ))}
-                {state.model && !state.models.some((model) => model.id === state.model) ? (
-                  <option value={state.model}>{state.model}</option>
-                ) : null}
-              </select>
+                onChange={(model) => controller.setModel(model)}
+                options={[
+                  ...state.models.map((model) => ({
+                    value: model.id,
+                    label: model.label || model.id,
+                    badge: model.vision === false ? "无图" : model.vision ? "可读图" : "",
+                    hint: model.vision === false ? "不能看图片，附图时会被拦下" : "可以一起看图",
+                  })),
+                  // A saved pick the service no longer offers still has to be
+                  // visible, otherwise the trigger would read "未选择".
+                  ...(state.model && !state.models.some((model) => model.id === state.model)
+                    ? [{ value: state.model, label: state.model, hint: "服务未提供此模型" }]
+                    : []),
+                ]}
+              />
             ) : (
               <span className="pl-small pl-muted">{state.model || "默认模型"}</span>
             )}

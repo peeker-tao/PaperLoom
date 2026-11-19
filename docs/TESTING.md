@@ -18,10 +18,11 @@ node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 17 passed
 node test/jump.test.mjs                         # 7 passed
 node test/model.test.mjs                        # 7 passed
-node test/pages.test.mjs                        # 8 passed
+node test/pages.test.mjs                        # 11 passed
 node test/composer.test.mjs                     # 8 passed
 node test/attachments.test.mjs                  # 21 passed
-node esbuild.config.mjs                         # content/plugin.js ~299 KB
+node test/selection.test.mjs                    # 20 passed
+node esbuild.config.mjs                         # content/plugin.js ~326 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
@@ -48,7 +49,7 @@ node esbuild.config.mjs                         # content/plugin.js ~299 KB
 | `test_chat_images.py` | 附图：`data:` URL/格式/单张与合计体积上限、**不能读图的模型在调用前被拒绝**（`model_no_vision`）、旧版单张 `image` 参数仍可用、说明随图一起发送、**问题在重开会话后仍带图**（`attachments` 落库） | ✅ 13 项 |
 | `test_job_idempotency.py` | 重复创建任务：同一请求两次返回同一任务、页序无关、`None` 只匹配 `None`、**不同页集合各自建任务**、不同文档互不影响、`retry` 仍能新建、已完成的任务不再阻塞 | ✅ 7 项 |
 
-### 插件侧（68 项）
+### 插件侧（91 项）
 
 `plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
 覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
@@ -68,8 +69,14 @@ viewer 拒绝页码时退回 `scrollIntoView`、**没有任何可用 API 时返�
 `service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
 同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。
 
-`plugin/test/pages.test.mjs`（8 项）锁定页码范围解析：`1-3,5`、全角逗号与破折号、
-`~`、去重排序、留空表示全文，以及会翻错页的错误输入（`0`、倒序、`abc`、超范围）。
+`plugin/test/pages.test.mjs`（11 项）锁定页码范围解析：`1-3,5`、全角逗号与破折号、
+`~`、去重排序、留空表示全文、会翻错页的错误输入（`0`、倒序、`abc`、超范围），
+以及页码网格的回填格式化（**格式化与解析互为逆运算**，否则点选出来的页会变成别的页）。
+
+`plugin/test/selection.test.mjs`（20 项）锁定侧边栏划词的判定：折叠选区（单击）、
+单字符、纯标点、在 `textarea`/`contenteditable` 里选字都不弹工具条；
+`data-segment-id` 向上查找（含跨 shadow 边界与自引用链不挂死）；
+拿不到矩形时仍然可用（定位回退到顶部）。
 
 `plugin/test/composer.test.mjs`（8 项）锁定 Enter 与输入法：候选窗打开时 Enter 不发送、
 `keyCode 229` 即使 `isComposing` 为 false 也算输入法、`compositionend` 之后的英文 Enter

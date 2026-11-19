@@ -30,7 +30,9 @@ def _columns(path, table: str) -> set[str]:
 
 def _version(path) -> int:
     with sqlite3.connect(path) as conn:
-        row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()
     return int(row[0]) if row else 0
 
 

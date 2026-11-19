@@ -23,7 +23,6 @@ type Layout = "markdown" | "overlay";
 export function BilingualView(props: { controller: ReaderController; state: UIState }): JSX.Element | null {
   const { controller, state } = props;
   const [active, setActive] = useState<string | null>(null);
-  const [picked, setPicked] = useState<Selection | null>(null);
   const [layout, setLayout] = useState<Layout>("markdown");
   const [showNoise, setShowNoise] = useState(false);
   const [image, setImage] = useState<RenderedPage | null>(null);
@@ -84,15 +83,6 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
   ).length;
   const translated = pageSegments.filter((segment) => segment.translation).length;
   const overlayReady = layout === "overlay" && Boolean(image) && !renderFailed;
-
-  const captureSelection = () => {
-    const doc = (controller as any).reader?._iframeWindow?.document as Document | undefined;
-    const selection = doc?.getSelection?.() || null;
-    const text = selection?.toString().trim();
-    if (text && text.length > 1) {
-      setPicked({ text, page: state.page, kind: "text" });
-    }
-  };
 
   const activeSegment = active ? pageSegments.find((item) => item.id === active) || null : null;
 
@@ -183,26 +173,6 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         </button>
       </div>
 
-      {picked ? (
-        <div className="pl-bilingual__bar" style={{ background: "#f7f8f5" }}>
-          <span className="pl-chip" title={picked.text}>
-            <span>{picked.text.slice(0, 80)}</span>
-          </span>
-          <button type="button" className="pl-btn" onClick={() => controller.explainSelection(picked)}>
-            解释
-          </button>
-          <button type="button" className="pl-btn" onClick={() => controller.askSelection(picked)}>
-            提问
-          </button>
-          <button type="button" className="pl-btn" onClick={() => void controller.saveSelectionNote(picked)}>
-            保存笔记
-          </button>
-          <button type="button" className="pl-btn pl-btn--ghost" onClick={() => setPicked(null)}>
-            取消
-          </button>
-        </div>
-      ) : null}
-
       {document.alignment !== "segment" ? (
         <div className="pl-card pl-card--warn pl-small" style={{ margin: "8px 12px 0" }}>
           {document.alignmentNote}（对齐级别：{document.alignment}）
@@ -216,7 +186,6 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         ref={stageRef}
         className="pl-bilingual__cols"
         style={{ display: "block", overflowY: "auto" }}
-        onMouseUp={captureSelection}
       >
         {!pageSegments.length ? (
           <div className="pl-bilingual__empty">
@@ -243,6 +212,7 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
             {pageSegments.map((segment) => (
               <div
                 key={segment.id}
+                data-segment-id={segment.id}
                 className={`pl-seg${active === segment.id ? " active" : ""} pl-seg-grid${mode === "dual" ? "" : " single"}`}
                 onClick={() => setActive(segment.id)}
               >

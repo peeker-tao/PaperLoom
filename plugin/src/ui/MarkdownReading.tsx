@@ -148,7 +148,7 @@ function Paragraph(props: {
     // cropped out of the rendered page, so figures stay visible in the
     // reading view instead of silently disappearing.
     return (
-      <figure className="pl-md__figure" onClick={onPick}>
+      <figure className="pl-md__figure" data-segment-id={segment.id} onClick={onPick}>
         <PageCrop
           controller={controller}
           page={segment.page}
@@ -178,6 +178,7 @@ function Paragraph(props: {
     return (
       <div
         className={`pl-md__heading pl-md__heading--${level}${active ? " active" : ""}`}
+        data-segment-id={segment.id}
         onClick={onPick}
       >
         {showOriginal ? <div className="pl-md__en">{segment.text}</div> : null}
@@ -194,6 +195,7 @@ function Paragraph(props: {
       className={`pl-md__para${PROSE_KINDS.has(segment.kind) ? "" : " pl-md__para--minor"}${
         active ? " active" : ""
       }`}
+      data-segment-id={segment.id}
       onClick={onPick}
     >
       {showOriginal ? <p className="pl-md__en">{segment.text}</p> : null}
