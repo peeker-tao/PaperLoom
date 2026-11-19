@@ -238,6 +238,49 @@ export const SHADOW_CSS = `
 }
 .pl-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 210px; }
 .pl-chip button { border: none; background: transparent; cursor: pointer; color: inherit; font-size: 12px; }
+/* ---- attachments ------------------------------------------------------- */
+/* A row of thumbnails above the textarea. They stay small and horizontal so a
+   four-image question does not push the textarea off the screen. */
+.pl-attach {
+  display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 6px;
+  scrollbar-width: thin;
+}
+.pl-attach__item {
+  position: relative; flex: 0 0 auto; width: 66px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.pl-attach__thumb {
+  width: 66px; height: 66px; object-fit: cover; border-radius: var(--pl-radius-sm);
+  border: 1px solid var(--pl-border); background: #f2f0ea; display: block;
+}
+.pl-attach__remove {
+  position: absolute; top: -5px; right: -5px;
+  width: 18px; height: 18px; padding: 0; line-height: 1;
+  border-radius: 999px; border: 1px solid #d8d5c9; background: #fff;
+  color: #6b6f6c; font-size: 11px; cursor: pointer;
+  box-shadow: var(--pl-shadow-1);
+}
+.pl-attach__remove:hover { background: #fdeceb; border-color: #e5b4b0; color: #a33b33; }
+.pl-attach__caption {
+  width: 66px; font-size: 10.5px; padding: 2px 4px; border-radius: 5px;
+  border: 1px solid var(--pl-border); background: #fff; color: var(--pl-fg);
+}
+.pl-attach__caption::placeholder { color: var(--pl-faint); }
+.pl-attach__error {
+  color: #a33b33; background: #fdf3f2; border: 1px solid #f0d6d3;
+  border-radius: var(--pl-radius-sm); padding: 4px 6px; margin-bottom: 6px;
+}
+.pl-attach__add { flex: 0 0 auto; }
+/* Images inside a sent question. */
+.pl-msg__images { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.pl-msg__image { margin: 0; }
+.pl-msg__image img {
+  max-width: 100%; max-height: 220px; display: block; border-radius: var(--pl-radius-sm);
+  border: 1px solid var(--pl-border); background: #fff;
+}
+.pl-msg__image figcaption {
+  font-size: 11px; color: var(--pl-muted); margin-top: 2px; max-width: 220px;
+}
 .pl-footer {
   display: flex; align-items: center; gap: 8px; padding: 5px 10px;
   border-top: 1px solid var(--pl-border); background: #f6f5f0; color: var(--pl-muted); font-size: 11px;

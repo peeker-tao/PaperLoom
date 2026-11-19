@@ -142,6 +142,9 @@ MIGRATIONS: list[str] = [
     # Which configuration produced a translation. NULL means the row predates
     # this column ("unknown" provenance); user data is preserved.
     """ALTER TABLE segments ADD COLUMN translation_config TEXT;""",
+    # Images a user attached to a question, stored with the message so reopening
+    # a paper shows what was asked instead of a question about nothing.
+    """ALTER TABLE messages ADD COLUMN attachments TEXT;""",
     # Layout (BabelDOC) status is tracked separately from text translation so a
     # failed/absent engine never hides the usable text result.
     """ALTER TABLE jobs ADD COLUMN layout TEXT;""",
@@ -530,7 +533,8 @@ class Database:
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO messages(id, document_id, conversation_id, role, content,
-                    citations, model, usage, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    citations, model, usage, status, attachments, created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     msg["id"],
                     msg["document_id"],
@@ -541,6 +545,7 @@ class Database:
                     msg.get("model", ""),
                     json.dumps(msg["usage"]) if msg.get("usage") else None,
                     msg.get("status", "done"),
+                    json.dumps(msg["attachments"]) if msg.get("attachments") else None,
                     msg.get("created_at", now()),
                 ),
             )
@@ -568,6 +573,8 @@ class Database:
                 item = dict(row)
                 item["citations"] = json.loads(item["citations"])
                 item["usage"] = json.loads(item["usage"]) if item["usage"] else None
+                raw = item.pop("attachments", None)
+                item["attachments"] = json.loads(raw) if raw else []
                 out.append(item)
             return out
 

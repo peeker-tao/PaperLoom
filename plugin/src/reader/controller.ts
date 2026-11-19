@@ -1,4 +1,12 @@
 import { errorText, debug, flush } from "../log";
+import {
+  addImage as addImageToList,
+  describeImages,
+  MAX_IMAGES,
+  removeImage as removeImageFromList,
+  setCaption as setCaptionInList,
+  type ChatImage,
+} from "../attachments";
 import { isKnownModel, modelLabel, resolveChatModel } from "../model-choice";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
 import { parsePageInput } from "../pages";
@@ -118,7 +126,8 @@ export interface UIState {
   alignmentNote: string;
   /** Model the next chat request will use (a snapshot is taken at send time). */
   model: string;
-  models: { id: string; label: string }[];
+  /** `vision` comes from the service so the UI never guesses what a model can do. */
+  models: { id: string; label: string; vision?: boolean }[];
   /** Scope of each model setting, shown next to the picker so it is unambiguous. */
   translateModel: string;
   analysisModel: string;
@@ -133,6 +142,13 @@ export interface UIState {
   canReturnToTranslation: boolean;
   /** Page-range dialog for "指定页" translation. */
   translateDialogOpen: boolean;
+  /**
+   * Images waiting to be sent with the next question. Cleared on send, and on
+   * failure too — a silent leftover would attach the same picture twice.
+   */
+  attachments: ChatImage[];
+  /** Why the last attach attempt failed, shown under the thumbnails. */
+  attachmentError: string | null;
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -174,6 +190,8 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     highlight: null,
     canReturnToTranslation: false,
     translateDialogOpen: false,
+    attachments: [],
+    attachmentError: null,
   };
 }
 
@@ -301,7 +319,7 @@ export class ReaderController {
       let chatModel = "";
       let translateModel = "";
       let analysisModel = "";
-      let models: { id: string; label: string }[] = [];
+      let models: { id: string; label: string; vision?: boolean }[] = [];
       try {
         const settings = await this.host.service.client.getSettings();
         chatModel = settings.settings.chat_model;
@@ -398,6 +416,18 @@ export class ReaderController {
           status: item.status === "failed" ? "failed" : item.status === "cancelled" ? "cancelled" : "done",
           model: item.model,
           usage: item.usage || undefined,
+          // Without this a question about a figure came back as a question about
+          // nothing: the picture was there when asked and gone after a reload.
+          images: Array.isArray(item.attachments) && item.attachments.length
+            ? item.attachments
+                .filter((image: any) => image?.dataUrl)
+                .map((image: any, index: number) => ({
+                  id: image.id || `${item.id}-img-${index}`,
+                  dataUrl: image.dataUrl,
+                  caption: image.caption || "",
+                  name: image.name || "",
+                }))
+            : undefined,
         }));
       this.set({ conversationId: conversation.id, messages: mapped });
     } catch (error) {
@@ -531,6 +561,77 @@ export class ReaderController {
 
   setComposerDraft(text: string): void {
     this.set({ composerDraft: text });
+  }
+
+  /**
+   * Whether the given model can read images.
+   *
+   * The answer comes from the service, not from a list kept here: a local copy
+   * drifts the moment a model is added, and the failure mode is an image the
+   * provider silently ignores while the user waits for an answer about it.
+   */
+  modelSeesImages(model: string): boolean {
+    if (!model) {
+      // No pick yet: let the service decide, it knows the configured default.
+      return true;
+    }
+    const option = this.state.models.find((item) => item.id === model);
+    if (!option) {
+      return true;
+    }
+    return option.vision !== false;
+  }
+
+  private noVisionMessage(model: string): string {
+    const able = this.state.models.filter((item) => item.vision).map((item) => item.id);
+    const who = able.length ? able.join("、") : "支持读图的模型";
+    return `${modelLabel(model, this.state.models)} 不能读图，请切换到 ${who} 再发送，或移除图片`;
+  }
+
+  /**
+   * Queue an image for the next question.
+   *
+   * Validation lives in `attachments.ts` so the same rules apply wherever an
+   * image arrives from (paste, file picker, a figure annotation). A refusal is
+   * reported here and in the panel: silently ignoring a paste looks exactly like
+   * a broken clipboard.
+   */
+  addAttachment(image: ChatImage): boolean {
+    const { list, error } = addImageToList(this.state.attachments, image);
+    if (error) {
+      this.set({ attachmentError: error });
+      this.notice(error);
+      return false;
+    }
+    this.set({ attachments: list, attachmentError: null });
+    const waiting = list.length;
+    this.notice(
+      waiting >= MAX_IMAGES
+        ? `已附带 ${describeImages(list)}，达到上限，发送后才能再加`
+        : `已附带 ${describeImages(list)}`,
+    );
+    return true;
+  }
+
+  removeAttachment(id: string): void {
+    this.set({
+      attachments: removeImageFromList(this.state.attachments, id),
+      attachmentError: null,
+    });
+  }
+
+  /** Report a refusal that happened before an image could be read at all. */
+  rejectAttachment(reason: string): void {
+    this.set({ attachmentError: reason });
+    this.notice(reason);
+  }
+
+  clearAttachments(): void {
+    this.set({ attachments: [], attachmentError: null });
+  }
+
+  setAttachmentCaption(id: string, caption: string): void {
+    this.set({ attachments: setCaptionInList(this.state.attachments, id, caption) });
   }
 
   openSettings(open = true): void {
@@ -991,7 +1092,7 @@ export class ReaderController {
       return;
     }
     const trimmed = question.trim();
-    if (!trimmed) {
+    if (!trimmed && !this.state.attachments.length) {
       return;
     }
     const selection = options.selection ?? this.state.selection;
@@ -1003,11 +1104,28 @@ export class ReaderController {
     // Snapshot the model now: the picker stays interactive during streaming, and
     // a mid-answer change must not swap the model under the running request.
     const requestedModel = this.state.model;
+    // Same reasoning for images: a picture added while the answer streams belongs
+    // to the *next* question, not this one.
+    const attached = this.state.attachments;
+    // A figure annotation carries its own screenshot, so it needs the same check
+    // as a composer image — otherwise "解释此图" fails downstream with a 400 that
+    // looks like a service fault.
+    const figureImage = selection?.kind === "figure" ? selection.image : undefined;
+    if ((attached.length || figureImage) && !this.modelSeesImages(requestedModel)) {
+      this.set({ attachmentError: this.noVisionMessage(requestedModel) });
+      this.notice(this.noVisionMessage(requestedModel));
+      return;
+    }
+    // An image on its own is a complete question ("这是什么"); without a default
+    // the request would carry pictures and no instruction, and the model would
+    // answer something vague that looks like a bug.
+    const asked = trimmed || "请说明这几张图的内容、关键信息，以及它们在论文中的作用。";
     const userMessage: ChatMessage = {
       id: `u-${Date.now()}`,
       role: "user",
-      content: trimmed,
+      content: asked,
       status: "done",
+      images: attached.length ? attached : undefined,
     };
     const assistant: ChatMessage = {
       id: `a-${Date.now()}`,
@@ -1031,6 +1149,10 @@ export class ReaderController {
       composerDraft: "",
       selection,
       scope,
+      // Cleared on send, not on success: if the request fails the user retypes a
+      // question, and re-attaching the same picture by hand would be busywork.
+      attachments: [],
+      attachmentError: null,
     });
     const abort = new AbortController();
     this.chatAbort = abort;
@@ -1041,11 +1163,19 @@ export class ReaderController {
           conversationId: this.state.conversationId,
           scope,
           selection,
-          image: selection?.kind === "figure" ? selection.image : undefined,
+          image: figureImage,
+          images: attached.length
+            ? attached.map((item) => ({
+                id: item.id,
+                dataUrl: item.dataUrl,
+                caption: item.caption,
+                name: item.name,
+              }))
+            : undefined,
           // Without this the service silently used `settings.chat_model` and the
           // picker did nothing at all.
           model: requestedModel || undefined,
-          messages: [...history, { role: "user", content: trimmed }],
+          messages: [...history, { role: "user", content: asked }],
         },
         abort.signal,
       );

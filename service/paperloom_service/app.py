@@ -11,6 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,7 @@ from .jobs import JobManager
 from .markdown import markdown_stats, render_markdown, suggested_filename
 from .models import (
     AnalysisRequest,
+    ChatAttachment,
     ChatRequest,
     ClientLogRequest,
     ExtractTermsRequest,
@@ -71,11 +73,84 @@ CHAT_SYSTEM = (
 # (`/v1/settings`) and request validation cannot drift apart — a client that asks
 # for a retired id used to be rejected downstream by the provider with an error
 # that reads like a network failure.
-SUPPORTED_MODELS: tuple[dict[str, str], ...] = (
-    {"id": "deepseek-flash", "label": "DeepSeek Flash（1M 上下文，支持图片）"},
-    {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（推理更强，无图片）"},
+SUPPORTED_MODELS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "deepseek-flash",
+        "label": "DeepSeek Flash（1M 上下文，支持图片）",
+        "vision": True,
+    },
+    {
+        "id": "deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro（推理更强，无图片）",
+        "vision": False,
+    },
 )
 SUPPORTED_MODEL_IDS = tuple(model["id"] for model in SUPPORTED_MODELS)
+VISION_MODEL_IDS = tuple(m["id"] for m in SUPPORTED_MODELS if m.get("vision"))
+
+# Attachments. The limits are per request and generous enough for a figure crop;
+# the per-image cap exists because a whole-page screenshot at 4x can run to a few
+# megabytes and the provider rejects (bills for) oversized payloads.
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 2_500_000
+MAX_IMAGE_TOTAL_BYTES = 6_000_000
+ALLOWED_IMAGE_MIMES = ("image/png", "image/jpeg", "image/webp")
+
+
+def model_supports_vision(model: str | None) -> bool:
+    return (model or "") in VISION_MODEL_IDS
+
+
+def image_problem(urls: list[str]) -> str | None:
+    """Why these attachments cannot be sent, or None. Never raises on garbage."""
+    if len(urls) > MAX_IMAGES:
+        return f"一次最多附带 {MAX_IMAGES} 张图片（当前 {len(urls)} 张）"
+    total = 0
+    for index, url in enumerate(urls, start=1):
+        if not url.startswith("data:image/"):
+            return f"第 {index} 张图片不是 data:image/* 数据，可能粘贴失败，请重新添加"
+        header, _, payload = url.partition(",")
+        mime = header[len("data:") :].split(";")[0].lower()
+        if mime not in ALLOWED_IMAGE_MIMES:
+            return (
+                f"第 {index} 张图片格式为 {mime or '未知'}，只支持 "
+                + "、".join(m.replace("image/", "").upper() for m in ALLOWED_IMAGE_MIMES)
+            )
+        size = len(payload) * 3 // 4
+        total += size
+        if size > MAX_IMAGE_BYTES:
+            return (
+                f"第 {index} 张图片约 {size / 1_000_000:.1f}MB，"
+                f"单张上限 {MAX_IMAGE_BYTES / 1_000_000:.1f}MB"
+            )
+    if total > MAX_IMAGE_TOTAL_BYTES:
+        return (
+            f"图片合计约 {total / 1_000_000:.1f}MB，"
+            f"上限 {MAX_IMAGE_TOTAL_BYTES / 1_000_000:.1f}MB"
+        )
+    return None
+
+
+def attach_images(messages: list[dict], urls: list[str], captions: list[str]) -> None:
+    """Turn the last user message into text + image parts, in order.
+
+    Done in place because the surrounding code builds a plain message list; the
+    alternative was threading a second structure through the stream setup.
+    """
+    if not urls:
+        return
+    user_indexes = [i for i, m in enumerate(messages) if m["role"] == "user"]
+    if not user_indexes:
+        return
+    index = user_indexes[-1]
+    parts: list[dict] = [{"type": "text", "text": str(messages[index]["content"])}]
+    for position, url in enumerate(urls):
+        caption = captions[position] if position < len(captions) else ""
+        if caption:
+            parts.append({"type": "text", "text": f"（图 {position + 1}：{caption}）"})
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    messages[index] = {"role": "user", "content": parts}
+
 
 
 def require_supported_model(model: str | None, *, field: str = "model") -> None:
@@ -872,6 +947,13 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                     "role": "user",
                     "content": question,
                     "model": "",
+                    # Stored so reopening the paper shows the image that was asked
+                    # about, not a question about nothing.
+                    "attachments": [
+                        item.model_dump(by_alias=True)
+                        for item in req.images
+                        if item.data_url
+                    ],
                 }
             )
 
@@ -897,27 +979,32 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
         ):
             messages.append({"role": "user", "content": question})
 
-        model = req.model or settings.chat_model
-        max_tokens = req.max_output_tokens or settings.max_output_tokens
+        # Attachments: the legacy single `image` (a figure annotation) plus any
+        # number of composer images, in the order the user added them.
+        attachments = [item for item in req.images if item.data_url]
         if req.image:
-            if not req.image.startswith("data:image/") or len(req.image) > 8_000_000:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "code": "image_invalid",
-                        "message": "图片必须是 data:image/* 的 Data URL，且不超过 8MB",
-                    },
-                )
-            user_indexes = [i for i, m in enumerate(messages) if m["role"] == "user"]
-            if user_indexes:
-                index = user_indexes[-1]
-                messages[index] = {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": str(messages[index]["content"])},
-                        {"type": "image_url", "image_url": {"url": req.image}},
-                    ],
-                }
+            attachments.insert(0, ChatAttachment(dataUrl=req.image))
+        urls = [item.data_url for item in attachments]
+        problem = image_problem(urls)
+        if problem:
+            raise HTTPException(
+                status_code=400, detail={"code": "image_invalid", "message": problem}
+            )
+        model = req.model or settings.chat_model
+        if urls and not model_supports_vision(model):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "model_no_vision",
+                    "message": (
+                        f"{model} 不能读图，请切换到 "
+                        + "、".join(VISION_MODEL_IDS)
+                        + " 再发送，或移除图片"
+                    ),
+                },
+            )
+        max_tokens = req.max_output_tokens or settings.max_output_tokens
+        attach_images(messages, urls, [item.caption for item in attachments])
         client = state.client()
 
         async def event_stream():
@@ -1258,6 +1345,11 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                 "model": message.model,
                 "usage": message.usage,
                 "status": message.status,
+                "attachments": [
+                    item.model_dump(by_alias=True)
+                    for item in message.attachments
+                    if item.data_url
+                ],
             }
         )
         return {"ok": True}

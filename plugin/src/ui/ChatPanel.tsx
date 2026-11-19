@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { ACCEPT_ATTRIBUTE, ACCEPT_LABEL, MAX_IMAGES, checkCandidate, describeImages } from "../attachments";
+import type { ChatImage } from "../attachments";
 import { shouldSendOnEnter } from "../composer";
 import { debug } from "../log";
 import type { ReaderController, UIState } from "../reader/controller";
@@ -8,6 +10,40 @@ import { Empty, MarkdownView, Spinner } from "./common";
 /** Report the first keystroke once: it separates "keys never arrive" from
  * "keys arrive but the text does not stick". */
 let loggedKeystroke = false;
+
+/** Ids only need to be unique within one composer session. */
+let imageSeq = 0;
+
+function nextImageId(): string {
+  imageSeq += 1;
+  return `img-${Date.now()}-${imageSeq}`;
+}
+
+/**
+ * Read a picked or pasted file into a data URL.
+ *
+ * A rejected read is reported rather than dropped: FileReader fails silently on
+ * some clipboard sources, and the user would otherwise see nothing happen.
+ */
+function readAsDataUrl(file: Blob): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === "string" ? reader.result : "";
+        resolve(result.startsWith("data:image/") ? result : null);
+      };
+      reader.onerror = () => {
+        debug("file read failed", String(reader.error));
+        resolve(null);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      debug("file read threw", String(error));
+      resolve(null);
+    }
+  });
+}
 
 function usageLabel(usage: Usage): string {
   const tokens = (usage.promptTokens || 0) + (usage.completionTokens || 0);
@@ -19,6 +55,7 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
   const { controller, state } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const lastSent = useRef<string | null>(null);
   /** True while an IME composition is open; see onCompositionStart below. */
   const composing = useRef(false);
@@ -43,14 +80,47 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
     controller.setComposerDraft(text);
   };
 
+  const canSend = Boolean(draft.trim()) || state.attachments.length > 0;
+
   const submit = () => {
     const text = draft.trim();
-    if (!text) {
+    if (!text && !state.attachments.length) {
       return;
     }
     update("");
     inputRef.current?.focus();
     void controller.ask(text);
+  };
+
+  /**
+   * Attach files the user picked or pasted.
+   *
+   * Each file is checked before it is read, so a 40MB TIFF is refused in a
+   * millisecond instead of after decoding it. A refusal is surfaced as a notice
+   * from the controller — silence reads as "paste does nothing".
+   */
+  const attachFiles = async (files: File[]) => {
+    for (const file of files) {
+      const problem = checkCandidate(file);
+      if (problem) {
+        controller.rejectAttachment(problem);
+        break;
+      }
+      const dataUrl = await readAsDataUrl(file);
+      if (!dataUrl) {
+        controller.rejectAttachment(`${file.name || "这张图片"} 没有读到内容，请重新选择或粘贴`);
+        break;
+      }
+      const image: ChatImage = {
+        id: nextImageId(),
+        dataUrl,
+        caption: "",
+        name: file.name || "粘贴的图片",
+      };
+      if (!controller.addAttachment(image)) {
+        break;
+      }
+    }
   };
 
   useEffect(() => {
@@ -148,7 +218,19 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
                   }}
                 />
               ) : (
-                message.content
+                <>
+                  {message.images?.length ? (
+                    <div className="pl-msg__images">
+                      {message.images.map((image) => (
+                        <figure key={image.id} className="pl-msg__image">
+                          <img src={image.dataUrl} alt={image.name || "附图"} />
+                          {image.caption ? <figcaption>{image.caption}</figcaption> : null}
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
+                  {message.content}
+                </>
               )}
               {message.role === "assistant" && message.status === "streaming" ? (
                 <div className="pl-small pl-muted" style={{ marginTop: 4 }}>
@@ -189,12 +271,57 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
             </span>
           </div>
         ) : null}
+        {state.attachments.length ? (
+          <div className="pl-attach">
+            {state.attachments.map((image) => (
+              <div key={image.id} className="pl-attach__item">
+                <img className="pl-attach__thumb" src={image.dataUrl} alt={image.name || "附图"} />
+                <button
+                  type="button"
+                  className="pl-attach__remove"
+                  title="移除这张图片"
+                  aria-label={`移除 ${image.name || "图片"}`}
+                  onClick={() => controller.removeAttachment(image.id)}
+                >
+                  ✕
+                </button>
+                <input
+                  className="pl-attach__caption"
+                  placeholder="说明（可选）"
+                  aria-label="图片说明"
+                  value={image.caption}
+                  onChange={(event) => controller.setAttachmentCaption(image.id, event.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {state.attachmentError ? (
+          <div className="pl-small pl-attach__error">{state.attachmentError}</div>
+        ) : null}
         <textarea
           ref={inputRef}
           className="pl-textarea"
-          placeholder="就这篇论文提问，Enter 发送，Shift+Enter 换行"
+          placeholder={
+            state.attachments.length
+              ? "就这些图片提问，Enter 发送，Shift+Enter 换行"
+              : "就这篇论文提问，Enter 发送，Shift+Enter 换行；可粘贴或添加图片"
+          }
           value={draft}
           onChange={(event) => update(event.target.value)}
+          onPaste={(event) => {
+            // A screenshot on the clipboard arrives as a file item, not as text,
+            // so the default paste does nothing at all — which is exactly what an
+            // ignored paste looks like. Intercept it and attach instead.
+            const files = Array.from(event.clipboardData?.items || [])
+              .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+              .map((item) => item.getAsFile())
+              .filter((file): file is File => Boolean(file));
+            if (files.length) {
+              event.preventDefault();
+              void attachFiles(files);
+            }
+          }}
           onInput={(event) => {
             // `onChange` in React is backed by `input`; handling it directly too
             // costs nothing and survives the store being slow.
@@ -245,6 +372,29 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
         />
         <div className="pl-composer__bottom">
           <div className="pl-row" style={{ gap: 6 }}>
+            <input
+              ref={fileRef}
+              type="file"
+              accept={ACCEPT_ATTRIBUTE}
+              multiple
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                // Reset immediately: picking the same file twice must fire again.
+                event.target.value = "";
+                void attachFiles(files);
+              }}
+            />
+            <button
+              type="button"
+              className="pl-btn pl-btn--ghost pl-attach__add"
+              title={`添加图片（${ACCEPT_LABEL}，最多 ${MAX_IMAGES} 张，也可直接粘贴）`}
+              aria-label="添加图片"
+              disabled={state.attachments.length >= MAX_IMAGES}
+              onClick={() => fileRef.current?.click()}
+            >
+              + 图片
+            </button>
             <select
               className="pl-select"
               value={state.scope}
@@ -287,7 +437,8 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
               <button
                 type="button"
                 className="pl-btn pl-btn--primary"
-                disabled={!draft.trim() || state.streaming}
+                disabled={!canSend || state.streaming}
+                title={state.attachments.length ? describeImages(state.attachments) : undefined}
                 onClick={() => submit()}
               >
                 发送

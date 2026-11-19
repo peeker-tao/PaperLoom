@@ -56,6 +56,22 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ChatAttachment(BaseModel):
+    """An image the user attached to a question.
+
+    `dataUrl` is a `data:image/...;base64,...` URL. It travels to the model as an
+    `image_url` part and is stored with the message so reopening the paper shows
+    what was asked.
+    """
+
+    id: str = ""
+    data_url: str = Field(default="", alias="dataUrl")
+    caption: str = ""
+    name: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
 class ChatRequest(BaseModel):
     document_id: str = Field(alias="documentId")
     conversation_id: str | None = Field(default=None, alias="conversationId")
@@ -64,6 +80,7 @@ class ChatRequest(BaseModel):
     image: str | None = Field(
         default=None, description="data:image/... base64 Data URL for figure questions"
     )
+    images: list[ChatAttachment] = Field(default_factory=list)
     model: str | None = None
     context_chars: int | None = Field(default=None, alias="contextChars")
     max_output_tokens: int | None = Field(default=None, alias="maxOutputTokens")
@@ -143,6 +160,7 @@ class PersistMessage(BaseModel):
     document_id: str | None = Field(default=None, alias="documentId")
     conversation_id: str | None = Field(default=None, alias="conversationId")
     citations: list[dict[str, Any]] = Field(default_factory=list)
+    attachments: list[ChatAttachment] = Field(default_factory=list)
     model: str = ""
     status: Literal["done", "failed", "cancelled", "streaming"] = "done"
     usage: dict[str, Any] | None = None

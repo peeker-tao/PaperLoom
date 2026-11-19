@@ -1,3 +1,7 @@
+import type { ChatImage } from "./attachments";
+
+export type { ChatImage };
+
 export type Scope = "selection" | "section" | "paper";
 export type ReadMode = "original" | "translated" | "dual";
 export type SidebarTab = "chat" | "notes" | "analysis";
@@ -54,6 +58,8 @@ export interface ChatMessage {
   status: "streaming" | "done" | "failed" | "cancelled";
   model?: string;
   usage?: Usage;
+  /** Images the user attached to this question (user messages only). */
+  images?: ChatImage[];
 }
 
 export interface Usage {
