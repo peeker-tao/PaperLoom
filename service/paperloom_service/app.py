@@ -66,6 +66,33 @@ CHAT_SYSTEM = (
     "没有依据时明确说“原文未提及”，不得编造。"
 )
 
+# Models the service will accept for a request. Kept in one place so the picker
+# (`/v1/settings`) and request validation cannot drift apart — a client that asks
+# for a retired id used to be rejected downstream by the provider with an error
+# that reads like a network failure.
+SUPPORTED_MODELS: tuple[dict[str, str], ...] = (
+    {"id": "deepseek-flash", "label": "DeepSeek Flash（1M 上下文，支持图片）"},
+    {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro（推理更强，无图片）"},
+)
+SUPPORTED_MODEL_IDS = tuple(model["id"] for model in SUPPORTED_MODELS)
+
+
+def require_supported_model(model: str | None, *, field: str = "model") -> None:
+    """Reject a model this service does not offer, naming the alternatives."""
+    if not model:
+        return
+    if model in SUPPORTED_MODEL_IDS:
+        return
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "unknown_model",
+            "message": (
+                f"不支持的模型 {model}（{field}）。可选：{', '.join(SUPPORTED_MODEL_IDS)}"
+            ),
+        },
+    )
+
 
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -303,16 +330,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             "baseUrlCheck": check_base_url(state.settings.base_url).as_dict(),
             "apiKey": api_key_status(cfg),
             "pricing": load_pricing(cfg),
-            "models": [
-                {
-                    "id": "deepseek-flash",
-                    "label": "DeepSeek Flash（1M 上下文，支持图片）",
-                },
-                {
-                    "id": "deepseek-v4-pro",
-                    "label": "DeepSeek V4 Pro（推理更强，无图片）",
-                },
-            ],
+            "models": [dict(model) for model in SUPPORTED_MODELS],
             "service": {"version": __version__, "apiVersion": SERVICE_API_VERSION},
         }
 
@@ -320,6 +338,19 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     async def update_settings(patch: SettingsPatch):
         data = patch.model_dump(exclude_none=True)
         api_key = data.pop("api_key", None)
+        # Refuse to save a model this service cannot run: the picker would then
+        # offer it and every request would fail downstream. An empty string means
+        # "leave it alone" — saving "" would send a blank model to the provider.
+        for field, label in (
+            ("translate_model", "翻译模型"),
+            ("chat_model", "问答模型"),
+            ("analysis_model", "分析模型"),
+        ):
+            if field in data:
+                if not str(data[field] or "").strip():
+                    data.pop(field)
+                    continue
+                require_supported_model(data[field], field=label)
         for key, value in data.items():
             if hasattr(state.settings, key):
                 setattr(state.settings, key, value)
@@ -635,6 +666,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.post("/v1/jobs")
     async def create_job(req: TranslateRequest):
         state.require_key()
+        require_supported_model(req.model, field="翻译模型")
         state.doc_or_404(req.document_id)
         job = manager().create_translation_job(
             req.document_id,
@@ -726,6 +758,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.post("/v1/chat")
     async def chat(req: ChatRequest, request: Request):
         state.require_key()
+        require_supported_model(req.model, field="问答模型")
         doc = state.doc_or_404(req.document_id)
         segments = state.db.get_segments(req.document_id)
         if not segments:
@@ -913,6 +946,7 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
     @app.post("/v1/analysis")
     async def analysis(req: AnalysisRequest, request: Request):
         state.require_key()
+        require_supported_model(req.model, field="分析模型")
         if not req.document_ids:
             raise HTTPException(
                 status_code=400,

@@ -6,6 +6,29 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **切换问答模型没有任何效果.** The picker called `setModel`, which only updated
+  local UI state; `ask()` never put `model` in the request body, so every
+  question ran on `settings.chat_model` while the sidebar displayed the chosen
+  one. `ask` now snapshots `state.model` at send time and sends it, which also
+  means changing the picker mid-answer cannot swap the model under a running
+  stream.
+- **选择在重启后丢失.** The pick is saved to the Zotero preference
+  `extensions.paperloom.chatModel` and restored on startup, but only while the
+  service still offers that model — a retired id falls back to the configured
+  default instead of breaking every question.
+- **未知模型会变成一个看不懂的上游报错.** `SUPPORTED_MODELS` is now one constant
+  used by `/v1/settings`, chat, analysis and translation jobs, so the picker and
+  the validator cannot drift apart. An unknown id returns
+  `400 unknown_model` naming the available models; `/v1/settings` refuses to
+  save one, and clearing a model field keeps the previous value instead of
+  storing `""`.
+- 问答、翻译、分析现在各自的模型来源是明确的：问答用用户选择（默认取
+  `chat_model`）、翻译用 `translate_model`、分析用 `analysis_model`。侧边栏的
+  下拉框只影响提问，标题与通知都写明了这一点；回答头部显示**实际**使用的模型
+  （`done` 事件回传，服务端回退时会与所选不同）。
+
 ## [0.2.2] - 2026-11-18
 
 ### Fixed

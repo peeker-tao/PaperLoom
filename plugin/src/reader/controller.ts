@@ -1,4 +1,5 @@
 import { errorText, debug, flush } from "../log";
+import { isKnownModel, modelLabel, resolveChatModel } from "../model-choice";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
 import { probeComposer, probeFocus, probeInteractive } from "../ui/probe";
 import type { ServiceClient } from "../service/client";
@@ -92,8 +93,12 @@ export interface UIState {
   analysis: AnalysisState | null;
   notes: NoteSummary[];
   alignmentNote: string;
+  /** Model the next chat request will use (a snapshot is taken at send time). */
   model: string;
   models: { id: string; label: string }[];
+  /** Scope of each model setting, shown next to the picker so it is unambiguous. */
+  translateModel: string;
+  analysisModel: string;
   translationStatus: TranslationStatus | null;
   /** Segment briefly highlighted after a citation/segment jump. */
   highlight: string | null;
@@ -128,8 +133,12 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     analysis: null,
     notes: [],
     alignmentNote: "",
-    model: "",
+    // The saved pick is restored here so the picker shows the user's choice on
+    // the very first render; `init` re-validates it against the service list.
+    model: String(prefs.get("extensions.paperloom.chatModel", "") || ""),
     models: [],
+    translateModel: "",
+    analysisModel: "",
     translationStatus: null,
     highlight: null,
   };
@@ -251,22 +260,32 @@ export class ReaderController {
       const segments = (await this.host.service.client.getSegments(document.id)).segments;
       const terms = (await this.host.service.client.getGlossary(document.id)).terms;
       let chatModel = "";
+      let translateModel = "";
+      let analysisModel = "";
       let models: { id: string; label: string }[] = [];
       try {
         const settings = await this.host.service.client.getSettings();
         chatModel = settings.settings.chat_model;
+        translateModel = settings.settings.translate_model;
+        analysisModel = settings.settings.analysis_model;
         models = settings.models || [];
       } catch (error) {
         debug("settings unavailable", errorText(error));
       }
+      // The saved pick wins, but only while the service still offers that model:
+      // a retired id must not wedge every question.
+      const saved = String(this.host.prefs.get("extensions.paperloom.chatModel", "") || "");
+      const chosen = resolveChatModel(saved, models, chatModel);
       this.set({
         document,
         segments,
         terms,
         ready: true,
         loading: false,
-        model: chatModel,
+        model: chosen,
         models,
+        translateModel,
+        analysisModel,
         alignmentNote: document.alignmentNote,
       });
       this.applyBodyStyles();
@@ -449,8 +468,26 @@ export class ReaderController {
     this.scheduleSaveReading({ selection });
   }
 
+  /**
+   * Choose the model for the *next* chat request and remember it.
+   *
+   * A generation already in flight keeps the model it started with: `ask`
+   * snapshots the value, so changing the picker mid-answer cannot swap the model
+   * under a running stream.
+   */
   setModel(model: string): void {
-    this.set({ model });
+    const picked = String(model || "").trim();
+    if (!picked) {
+      return;
+    }
+    if (!isKnownModel(picked, this.state.models)) {
+      this.notice(`服务未提供模型 ${picked}，请先刷新设置`);
+      debug("rejected unknown model", picked);
+      return;
+    }
+    this.set({ model: picked });
+    this.host.prefs.set("extensions.paperloom.chatModel", picked);
+    this.notice(`问答模型已切换为 ${modelLabel(picked, this.state.models)}（下一次提问生效）`);
   }
 
   setComposerDraft(text: string): void {
@@ -813,6 +850,9 @@ export class ReaderController {
       scope = "paper";
       this.notice("未选中文字，已改为整篇论文上下文");
     }
+    // Snapshot the model now: the picker stays interactive during streaming, and
+    // a mid-answer change must not swap the model under the running request.
+    const requestedModel = this.state.model;
     const userMessage: ChatMessage = {
       id: `u-${Date.now()}`,
       role: "user",
@@ -825,6 +865,9 @@ export class ReaderController {
       content: "",
       status: "streaming",
       citations: [],
+      // Shown while streaming, then replaced by the model the service reports
+      // actually answered — the two differ when the service falls back.
+      model: requestedModel,
     };
     const history = this.state.messages
       .filter((message) => message.status !== "streaming")
@@ -849,6 +892,9 @@ export class ReaderController {
           scope,
           selection,
           image: selection?.kind === "figure" ? selection.image : undefined,
+          // Without this the service silently used `settings.chat_model` and the
+          // picker did nothing at all.
+          model: requestedModel || undefined,
           messages: [...history, { role: "user", content: trimmed }],
         },
         abort.signal,

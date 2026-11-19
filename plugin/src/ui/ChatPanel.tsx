@@ -230,12 +230,13 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
               <select
                 className="pl-select"
                 value={state.model}
-                title="问答模型"
+                title="问答模型（只影响提问；翻译与分析各用设置里的模型）"
+                aria-label="问答模型"
                 onChange={(event) => controller.setModel(event.target.value)}
               >
                 {state.models.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.id}
+                    {model.label ? `${model.label}` : model.id}
                   </option>
                 ))}
                 {state.model && !state.models.some((model) => model.id === state.model) ? (

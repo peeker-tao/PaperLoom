@@ -17,12 +17,13 @@ cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 17 passed
 node test/jump.test.mjs                         # 5 passed
-node esbuild.config.mjs                         # content/plugin.js ~270 KB
+node test/model.test.mjs                        # 7 passed
+node esbuild.config.mjs                         # content/plugin.js ~271 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（180 项）
+### 服务端覆盖（188 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
@@ -33,6 +34,7 @@ node esbuild.config.mjs                         # content/plugin.js ~270 KB
 | `test_figures.py` | 图/表区域检测：相邻文本块定界、过窄间隙拒绝、区域内正文拒绝、**表格逐格吸收**、**同页两张表各取自己那一张**、``Table 1 shows …`` 不当题注、图片排在题注之前 | ✅ 7 项 |
 | `test_layout.py` | 版面切分回归：**同一行被拆成两个对象后重新拼合**、**跨栏跨页接续**、短行结束段落、标题不吞下一段、跨栏 bbox 只锚定主体列、`E-`+`RayZer` 不加空格、连字符与复合词区分、**公式打断的句子重新接上**、**小节标签不再劈开句子**、**`(cid:N)` 残片判为公式** | ✅ 10 项 |
 | `test_render.py` | 页面渲染：整页 PNG、`bbox` 裁切尺寸、畸形 bbox 拒绝、页码越界拒绝、未知文档 404、`capabilities.render` 上报、**8 线程并发渲染不弄崩 pdfium**、**相同请求命中缓存**（缺 `pypdfium2` 时自动跳过） | ✅ 8 项 |
+| `test_model_choice.py` | 模型透传与校验：**请求指定的模型被真正使用**（`done.model` 与消息记录一致）、未指定时回落默认、未知模型 400 并列出可选值（问答/分析/翻译三处）、`/v1/settings` 拒绝保存未知模型、清空字段保留旧值、`/v1/settings` 列表与校验器同源 | ✅ 8 项 |
 | `test_client_log.py` | 插件日志落盘、需鉴权、单次最多 200 行、成功请求写 `METHOD path -> status`、令牌错误写 401 | ✅ 5 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
 | `test_translation_config.py` | 生成配置身份、过期判定、无出处历史行按需重译 | ✅ |
@@ -41,7 +43,7 @@ node esbuild.config.mjs                         # content/plugin.js ~270 KB
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
 | `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
 
-### 插件侧（22 项）
+### 插件侧（29 项）
 
 `plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
 覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
@@ -53,6 +55,10 @@ node esbuild.config.mjs                         # content/plugin.js ~270 KB
 **pdf.js 可用时绝不调用 `reader.navigate`**（旧实现卡在这条分支上，导致「在 PDF 中查看」
 毫无反应）、1-based 页码换 0-based `pageIndex`、异步 `navigate` 会被 await、
 viewer 拒绝页码时退回 `scrollIntoView`、**没有任何可用 API 时返回失败而不是假装成功**。
+
+`plugin/test/model.test.mjs`（7 项）锁定聊天模型的选择规则：已保存的选择优先、
+无选择时用服务默认、**被下线的模型 id 不会被恢复**、默认值也不可用时退回第一个可选模型、
+模型列表尚未返回时不把选择框清空、`isKnownModel` 对未知 id 返回 false、标签回退。
 
 `service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
 同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。
@@ -69,6 +75,7 @@ viewer 拒绝页码时退回 `scrollIntoView`、**没有任何可用 API 时返�
 | 连续追问、会话持久化 | ✅ |
 | 阅读状态写入与恢复 | ✅ |
 | 翻译时效性（历史 23 段无出处） | ✅ `staleOnly` 任务重译完成，之后 `{total:23, current:23, stale:0}` |
+| 聊天模型透传（0.3.0） | ✅ 请求 `deepseek-flash` → `done.model=deepseek-flash`，$0.0017；请求 `deepseek-v4-pro` → `done.model=deepseek-v4-pro`，$0.0076（**单价差 4.4 倍，证明真的换了模型而不是回显**）；不传 → 回落 `deepseek-flash`；传未知 id → `400 unknown_model` 并列出可选值 |
 
 真实调用中发现并修复的问题（已包含在 0.1.2）：
 
