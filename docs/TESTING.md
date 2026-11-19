@@ -8,7 +8,7 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest service/tests -q
-# 180 passed in ~10s
+# 227 passed in ~12s
 
 .\\.venv\\Scripts\\python.exe -m ruff check service scripts
 # All checks passed!
@@ -16,14 +16,17 @@ Python **3.14.6**（项目 `.venv`）· Node **24.19.0** / npm **11.17.0**。
 cd plugin
 node node_modules/typescript/bin/tsc --noEmit   # 通过
 node test/overlay.test.mjs                      # 17 passed
-node test/jump.test.mjs                         # 5 passed
+node test/jump.test.mjs                         # 7 passed
 node test/model.test.mjs                        # 7 passed
-node esbuild.config.mjs                         # content/plugin.js ~271 KB
+node test/pages.test.mjs                        # 8 passed
+node test/composer.test.mjs                     # 8 passed
+node test/attachments.test.mjs                  # 21 passed
+node esbuild.config.mjs                         # content/plugin.js ~299 KB
 ```
 
 > 测试通过 `PAPERLOOM_FAKE_LLM=1` 使用本地假 LLM，**不会访问网络**，也不需要 API Key。
 
-### 服务端覆盖（188 项）
+### 服务端覆盖（227 项）
 
 | 测试文件 | 覆盖内容 | 结果 |
 | --- | --- | --- |
@@ -33,7 +36,7 @@ node esbuild.config.mjs                         # content/plugin.js ~271 KB
 | `test_reparse.py` | 重解析按原文保留已付费译文、可显式丢弃 | ✅ 2 项 |
 | `test_figures.py` | 图/表区域检测：相邻文本块定界、过窄间隙拒绝、区域内正文拒绝、**表格逐格吸收**、**同页两张表各取自己那一张**、``Table 1 shows …`` 不当题注、图片排在题注之前 | ✅ 7 项 |
 | `test_layout.py` | 版面切分回归：**同一行被拆成两个对象后重新拼合**、**跨栏跨页接续**、短行结束段落、标题不吞下一段、跨栏 bbox 只锚定主体列、`E-`+`RayZer` 不加空格、连字符与复合词区分、**公式打断的句子重新接上**、**小节标签不再劈开句子**、**`(cid:N)` 残片判为公式** | ✅ 10 项 |
-| `test_render.py` | 页面渲染：整页 PNG、`bbox` 裁切尺寸、畸形 bbox 拒绝、页码越界拒绝、未知文档 404、`capabilities.render` 上报、**8 线程并发渲染不弄崩 pdfium**、**相同请求命中缓存**（缺 `pypdfium2` 时自动跳过） | ✅ 8 项 |
+| `test_render.py` | 页面渲染：整页 PNG、`bbox` 裁切尺寸、畸形 bbox 拒绝、页码越界拒绝、未知文档 404、`capabilities.render` 上报、**8 线程并发渲染不弄崩 pdfium**、**相同请求命中缓存**、**四种 `/Rotate` 下裁切区域正确**（每种旋转一个"命中标记"测试 + 一个"空白保持空白"测试）、旋转页整页渲染（缺 `pypdfium2` 时自动跳过） | ✅ 17 项 |
 | `test_model_choice.py` | 模型透传与校验：**请求指定的模型被真正使用**（`done.model` 与消息记录一致）、未指定时回落默认、未知模型 400 并列出可选值（问答/分析/翻译三处）、`/v1/settings` 拒绝保存未知模型、清空字段保留旧值、`/v1/settings` 列表与校验器同源 | ✅ 8 项 |
 | `test_client_log.py` | 插件日志落盘、需鉴权、单次最多 200 行、成功请求写 `METHOD path -> status`、令牌错误写 401 | ✅ 5 项 |
 | `test_babeldoc.py` | 子进程超时/取消/启动失败/退出码/空产物/非法 PDF/密钥脱敏/临时配置清理/参数为列表（无 shell） | ✅ 15 项（假引擎，无需安装 BabelDOC） |
@@ -42,8 +45,10 @@ node esbuild.config.mjs                         # content/plugin.js ~271 KB
 | `test_context.py` | 上下文范围（选区/章节/整篇）、未知引用剔除 | ✅ |
 | `test_reading.py` | 阅读状态合并、选区清除、非法页码/宽度拒绝、按文档隔离 | ✅ |
 | `test_translate.py` | `is_translatable` 统一规则（公式/表格/参考文献/过短片段不译）、译文完整性校验（`too_short`/`no_chinese`/`untranslated`）、上下文注入位置 | ✅ 10 项 |
+| `test_chat_images.py` | 附图：`data:` URL/格式/单张与合计体积上限、**不能读图的模型在调用前被拒绝**（`model_no_vision`）、旧版单张 `image` 参数仍可用、说明随图一起发送、**问题在重开会话后仍带图**（`attachments` 落库） | ✅ 13 项 |
+| `test_job_idempotency.py` | 重复创建任务：同一请求两次返回同一任务、页序无关、`None` 只匹配 `None`、**不同页集合各自建任务**、不同文档互不影响、`retry` 仍能新建、已完成的任务不再阻塞 | ✅ 7 项 |
 
-### 插件侧（29 项）
+### 插件侧（68 项）
 
 `plugin/test/overlay.test.mjs` 用 esbuild 打包 `src/ui/overlay.ts` 后由 `node` 运行，
 覆盖：x 保留 / y 翻转、随宽度缩放、字号随框高填充且不溢出、过小框拒绝、逆序/畸形 bbox 拒绝、
@@ -62,6 +67,18 @@ viewer 拒绝页码时退回 `scrollIntoView`、**没有任何可用 API 时返�
 
 `service/tests/test_overlay_layout.py`（4 项）验证 Python 预览与插件规则一致：
 同一段译文在同样尺寸下都能放进框、字号收缩与放弃、拉丁词不断、行首无禁则标点。
+
+`plugin/test/pages.test.mjs`（8 项）锁定页码范围解析：`1-3,5`、全角逗号与破折号、
+`~`、去重排序、留空表示全文，以及会翻错页的错误输入（`0`、倒序、`abc`、超范围）。
+
+`plugin/test/composer.test.mjs`（8 项）锁定 Enter 与输入法：候选窗打开时 Enter 不发送、
+`keyCode 229` 即使 `isComposing` 为 false 也算输入法、`compositionend` 之后的英文 Enter
+仍然发送、修饰键组合交还给浏览器。
+
+`plugin/test/attachments.test.mjs`（21 项）锁定附图规则：格式（大小写不敏感）、
+单张与合计体积上限（**恰好等于上限接受、多一个字节拒绝**）、最大张数、
+**重复粘贴被拒而不重复计费**、从 data URL 反算真实字节数（含 base64 补位）、
+以及文件选择器声明的格式与校验器完全一致。
 
 ## 真实 API 验证（DeepSeek）
 

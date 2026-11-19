@@ -130,6 +130,30 @@ not raise, it crashes the process (the service vanished mid-read leaving only
 lock, and finished bitmaps are cached (24 entries keyed by file stamp, page,
 width and bbox) because the sidebar re-requests the same crops on every refresh.
 
+### Rotation is a coordinate change, not a detail
+
+A page may carry `/Rotate`. pdfium renders it upright — a page rotated 90° comes
+back as a bitmap that is *taller* than it is wide — while the bbox comes from
+pdfminer, which ignores rotation and stays in the unrotated frame. Mapping one
+onto the other as if every page were upright does not fail loudly: it returns a
+plausible rectangle cut from the wrong place, which is how a figure turns into an
+unrelated strip of the page. `_crop_box()` therefore handles the four rotations
+separately, and the mapping was measured against real renders, not derived on
+paper. The client-side canvas fallback still refuses rotated pages, because its
+own mapping would be wrong in the same way.
+
+## Attachments
+
+Images reach the model as `image_url` content parts on the last user message.
+Three entry points — paste, file picker, and figure annotation — are validated by
+the same rules in `plugin/src/attachments.ts` (PNG/JPEG/WebP, 2.5MB each, 6MB
+total, four images), and the service re-checks rather than trusting the client.
+
+A model without vision is refused *before* the request: `vision` comes from the
+service's model list (`/v1/settings`), so the plugin never keeps a second copy of
+the capability table to drift out of date. Attachments are stored with the user
+message (`messages.attachments`) so a reopened paper still shows what was asked.
+
 Re-parsing is versioned (`PARSER_VERSION`, currently `8`). When it runs,
 translations are matched back by source text
 (`replace_segments(..., keep_translations=True)`), so improving segmentation

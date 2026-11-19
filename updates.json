@@ -3,9 +3,9 @@
     "paperloom@peeker.dev": {
       "updates": [
         {
-          "version": "0.2.2",
-          "update_link": "https://github.com/peeker-tao/PaperLoom/releases/download/v0.2.2/paperloom-0.2.2.xpi",
-          "update_hash": "sha256:75159cf4a70020a299785ca1a17e9adb12fd4895243754c065a463f64c4c48ef",
+          "version": "0.3.0",
+          "update_link": "https://github.com/peeker-tao/PaperLoom/releases/download/v0.3.0/paperloom-0.3.0.xpi",
+          "update_hash": "sha256:f2893d286b6031f02e0ae240f8bac818e7218d955c7a6ccdfdd87c7baa37c331",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",

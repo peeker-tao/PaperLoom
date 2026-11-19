@@ -168,6 +168,7 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
             {state.document?.title || (state.loading ? "加载中…" : "")}
           </span>
           <IconButton
+            text
             title={state.bilingualOpen ? "关闭双语对照" : "打开双语对照"}
             active={state.bilingualOpen}
             disabled={!state.ready || state.document?.alignment === "none"}
@@ -175,7 +176,7 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           >
             双语
           </IconButton>
-          <IconButton title="术语表" onClick={() => controller.openGlossary(true)}>
+          <IconButton text title="术语表" onClick={() => controller.openGlossary(true)}>
             术语
           </IconButton>
           <IconButton title="设置" onClick={() => controller.openSettings(true)}>

@@ -4,7 +4,7 @@ All notable changes to PaperLoom are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-19
 
 ### Fixed — 在 PDF 中查看
 
@@ -32,6 +32,12 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed — 界面
 
+- **窄侧边栏里"双语/术语"被拆成两行字.** 那两枚按钮用的是 26px 见方的图标样式，
+  两个汉字塞进去就竖着断了行，标题栏看起来像一堆散落的字。文字型按钮现在按内容
+  自适应宽度、不换行；"PaperLoom" 也不会被压断。
+- **侧边栏窄到底部一行时，「发送」会被挤出面板、完全点不到**（280px 实测，
+  按钮右边缘超出面板 47px）。输入框下方两行现在都会换行，「发送」始终贴右。
+- 附图缩略图 78px、说明输入框同宽（原来 66px 会把占位文字截断）。
 - 阅读视图排版：正文行高 1.66、页标记改为吸顶细分隔线、图表卡片加阴影与
   悬停反馈、图片加载改为柔光 shimmer 而不是像报错的文字。
 - 侧边栏：统一设计令牌（暖中性色 + 深绿强调色、三级阴影、等宽字体令牌）、
@@ -93,6 +99,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 
+### Fixed — 模型选择
+
 - **切换问答模型没有任何效果.** The picker called `setModel`, which only updated
   local UI state; `ask()` never put `model` in the request body, so every
   question ran on `settings.chat_model` while the sidebar displayed the chosen
@@ -114,8 +122,69 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   下拉框只影响提问，标题与通知都写明了这一点；回答头部显示**实际**使用的模型
   （`done` 事件回传，服务端回退时会与所选不同）。
 
+### Added — 对话图片输入
+
+- **只能靠"给图表加注释"把图片塞进提问。** 直接在输入框里粘贴截图毫无反应（
+  剪贴板里是文件项，不是文字），看起来就像剪贴板坏了。现在可以从三个入口附图：
+  **粘贴、选择文件、图表注释**，三者的规矩完全一样。
+- 每张图有缩略图、移除按钮和**可选的说明**——说明会随图片一起送给模型，
+  否则"图 2 有什么区别"里的编号就失效了。
+- 规则集中在 `plugin/src/attachments.ts`（而不是散在 React 组件里）：仅
+  **PNG/JPEG/WebP**，单张 **2.5MB**、合计 **6MB**、最多 **4 张**。每种拒绝都写清
+  楚限制与支持的格式——"静默丢弃"和"模型没看图"在界面上长得一模一样。
+- **不能读图的模型会在发请求之前就拦下来。** `vision` 来自服务的模型列表
+  （`/v1/settings`），插件不再自己维护一份会过期的能力表；`deepseek-v4-pro`
+  无视觉能力，以前发过去会得到一个像服务故障的上游报错。图表注释同样走这个检查。
+- **图片在重开论文后还在**：随用户消息一起存库并随会话恢复，不会变成
+  "一个关于空气的问题"。
+- 只有图片、没有文字也可以发送（自动补一句默认问法），因为"这是什么"配一张
+  图本来就是正常问法。
+
+### Fixed — 论文图片显示
+
+- **旋转页面裁到了错误的位置.** pdfium 渲染时会把页面转正，所以带 `/Rotate 90`
+  的页面出来的位图是"竖"的，而 bbox 来自 pdfminer（忽略旋转，仍用未旋转坐标系）。
+  旧代码按"所有页面都是正的"去映射。它**不会报错**，而是裁出一个看起来合理的
+  矩形——图变成了页面上另一条不相干的带子。四种旋转现在分别处理；映射是**对着
+  真实渲染量出来的**，不是纸上推的（我第一版 270° 把上下写反了，测试抓住了）。
+- 每种旋转两个测试，因为一个不够：标记必须落在裁切结果**内部**，
+  而裁切空白区域必须**保持空白**。只"大致接近"的变换能过第一个、过不了第二个。
+- **两条渲染路径都失败时只说"本页无法渲染"。** 现在分别说明是哪条路径失败，并给出
+  「重试」——两条路径的原因完全不同（服务不可达 vs. 阅读器不交位图），
+  用户能据此做点事情。阅读器回退路径仍然**拒绝**旋转页面：它的坐标会以同样的
+  方式出错，说出来比画一个像样的谎话好。
+- **点击图表直接跳 PDF。** 现在先打开**高清放大**（按 2400px 重新渲染该区域，
+  不是把栏宽缩略图放大——图看不清通常是因为渲染得小，不是因为屏幕小），
+  浮层不改变阅读位置，Esc 或点击外部关闭，高清渲染失败时降级显示缩略图。
+
+### Fixed — 未接通的功能（审计）
+
+- **分析面板点「停止」后转圈不停.** 中止 fetch 抛的是 `AbortError`，
+  而 `catch` 特意忽略了它，于是 `status` 一直停在 `streaming`。中止不再被当成错误，
+  但它仍然是一个**结束**：现在会置为 `cancelled`，并用 `finally` 兜底把残留的
+  `streaming` 收尾（服务重启、连接断掉也一样）。
+- **对话消息卡在"生成中"** 同理：流没有 `done` 事件就结束时，消息永远保持
+  streaming、发送按钮一直禁用，只能重开阅读器。中止路径现在会收尾，
+  并保留已经收到的文字。
+- **同一批页面被翻译两次、也计费两次.** 双击、或 `withService` 在响应丢失后的重试，
+  会两次调用创建接口。`/v1/jobs` 现在带 `attach_existing=True`，
+  管理器发现**同一请求**（页序无关，`None` 只匹配 `None`）正在排队/运行时直接返回
+  那个任务。**不同**的页集合在服务端仍然允许（翻第 5 页和翻 1-3 页同时进行是合理的），
+  但客户端会明确拒绝并说明原因，而不是悄悄换掉任务。
+
 ### Tests
 
+- `plugin/test/attachments.test.mjs` (21) — format/size/count limits, duplicate
+  paste, base64 byte accounting, and that the file picker advertises exactly the
+  formats the validator accepts.
+- `service/tests/test_chat_images.py` (13) — image validation (non-data URL,
+  unsupported format, oversized), the vision-capability gate, the legacy single
+  `image` path, and that a question keeps its image across a reload.
+- `service/tests/test_job_idempotency.py` (7) — the guard is exercised in a single
+  tick, which is the real double-click window (the fake LLM finishes instantly, so
+  going through HTTP could not reproduce it).
+- `service/tests/test_render.py` (+7) — one marker crop and one blank crop per
+  rotation (0/90/180/270), plus a whole rotated page.
 - `plugin/test/pages.test.mjs` (8) — range parsing: `1-3,5`, full-width commas and
   dashes, de-duplication, blank = whole paper, and the error cases that would
   otherwise translate the wrong pages.

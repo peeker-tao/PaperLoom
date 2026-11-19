@@ -12,11 +12,17 @@ export function IconButton(props: {
   children: ReactNode;
   active?: boolean;
   disabled?: boolean;
+  /**
+   * Word labels ("双语") need room to sit on one line. The square variant is
+   * 26px wide, which wrapped two Chinese characters onto two rows — the header
+   * read as a stack of stray glyphs on a narrow sidebar.
+   */
+  text?: boolean;
 }): JSX.Element {
   return (
     <button
       type="button"
-      className={`pl-icon-btn${props.active ? " active" : ""}`}
+      className={`pl-icon-btn${props.text ? " pl-icon-btn--text" : ""}${props.active ? " active" : ""}`}
       title={props.title}
       aria-label={props.title}
       onClick={props.onClick}

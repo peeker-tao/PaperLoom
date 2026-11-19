@@ -122,7 +122,7 @@ export const SHADOW_CSS = `
   border-bottom: 1px solid var(--pl-border);
   background: var(--pl-panel);
 }
-.pl-brand { font-weight: 650; letter-spacing: 0.2px; color: var(--pl-accent); display: flex; align-items: center; gap: 6px; }
+.pl-brand { font-weight: 650; letter-spacing: 0.2px; color: var(--pl-accent); display: flex; align-items: center; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
 .pl-doc-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pl-muted); font-size: 12px; }
 .pl-icon-btn {
   border: 1px solid transparent; background: transparent; color: var(--pl-muted);
@@ -131,6 +131,11 @@ export const SHADOW_CSS = `
 }
 .pl-icon-btn:hover { background: var(--pl-accent-weak); color: var(--pl-accent); }
 .pl-icon-btn.active { background: var(--pl-accent-weak); color: var(--pl-accent); }
+/* Word labels: sized to their text, never wrapped. */
+.pl-icon-btn--text {
+  width: auto; min-width: 26px; padding: 0 7px; font-size: 12px;
+  white-space: nowrap; flex: 0 0 auto;
+}
 .pl-tabs { display: flex; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--pl-border); background: var(--pl-panel); }
 .pl-tab {
   flex: 1; border: none; background: transparent; padding: 5px 8px; border-radius: 6px;
