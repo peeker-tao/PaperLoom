@@ -43,6 +43,12 @@ ABSORB_KINDS = {"table", "noise", "formula", "meta"}
 # Text blocks closer than this belong to the same visual group. Table rows sit
 # about one line apart, so this has to cover normal leading.
 JOIN_GAP = 20.0
+# Whitespace kept around the drawing on both sides. Text boxes end at the last
+# glyph, while a table's rules and filled cells continue past it — 8.5pt in the
+# paper that exposed this — so a crop measured on text alone decapitates the
+# outermost column. Padding is dropped again if it would reach neighbouring
+# prose, so this cannot grow a crop into the next column.
+FIGURE_EDGE_PAD = 12.0
 
 
 def _by_page(segments: list[dict]) -> dict[int, list[dict]]:
@@ -184,6 +190,48 @@ def _valid(region: list[float], segments: list[dict], caption: dict) -> bool:
     return not _has_text_inside(region, segments, caption)
 
 
+def _widen_to_content(
+    region: list[float], segments: list[dict], caption: dict
+) -> list[float]:
+    """Extend the region sideways until it covers the drawing's own row.
+
+    The horizontal span is measured on the page's *wide* blocks (see
+    ``_column_span``), so the outermost columns of a table — narrow cells, well
+    under the width threshold — fall outside it and were cut off. Anything that
+    is part of the drawing and sits at this height belongs to it, so the region
+    keeps growing while such blocks touch it. Only blocks that already reach the
+    region are absorbed; a label in the next column over is its own object.
+    """
+    x0, y0, x1, y1 = region
+    for _ in range(8):
+        grew = False
+        for seg in segments:
+            if seg is caption or seg.get("kind") not in ABSORB_KINDS:
+                continue
+            bx0, by0, bx1, by1 = seg["bbox"]
+            if not (y0 - 1.0 <= (by0 + by1) / 2 <= y1 + 1.0):
+                continue
+            if bx1 < x0 - JOIN_GAP or bx0 > x1 + JOIN_GAP:
+                continue
+            nx0, nx1 = min(x0, bx0), max(x1, bx1)
+            if nx0 < x0 - 0.01 or nx1 > x1 + 0.01:
+                x0, x1, grew = nx0, nx1, True
+        if not grew:
+            break
+    return [x0, y0, x1, y1]
+
+
+def _padded(
+    region: list[float], pad: float, page_width: float | None = None
+) -> list[float]:
+    """The region with room to breathe on both sides, kept on the page."""
+    x0 = max(0.0, region[0] - pad)
+    x1 = region[2] + pad
+    if page_width:
+        x1 = min(page_width, x1)
+    return [x0, region[1], x1, region[3]]
+
+
 def _gap(caption: dict, region: list[float], above: bool) -> float:
     """How much of the page the candidate region claims.
 
@@ -201,6 +249,7 @@ def _region(
     *,
     above: bool,
     page_height: float | None = None,
+    page_width: float | None = None,
     margin: float = 45.0,
 ) -> list[float] | None:
     """Return ``[x0, y0, x1, y1]`` for the picture area, or None.
@@ -234,6 +283,19 @@ def _region(
         region = [x0, edge, x1, cb[1]]
     if not _valid(region, segments, caption):
         return None
+    widened = _widen_to_content(region, segments, caption)
+    # A text box ends at its last glyph; a table's rules and filled cells carry
+    # on past it (8.5pt in the paper that exposed this), so a crop that stops at
+    # the text still decapitates the outermost column. Pad until the drawing has
+    # room, and give the padding back if it would swallow neighbouring prose.
+    for pad in (FIGURE_EDGE_PAD, FIGURE_EDGE_PAD / 2):
+        candidate = _padded(widened, pad, page_width)
+        if _valid(candidate, segments, caption):
+            widened = candidate
+            break
+    # Widening is only an improvement if it does not drag prose into the crop.
+    if widened != region and _valid(widened, segments, caption):
+        region = widened
     return region
 
 
@@ -262,7 +324,8 @@ def detect_figures(
         span = _column_span(segs)
         if span[1] - span[0] < MIN_FIGURE_WIDTH:
             continue
-        page_height = (page_sizes or {}).get(page, (0.0, 0.0))[1]
+        page_size = (page_sizes or {}).get(page, (0.0, 0.0))
+        page_width, page_height = page_size[0], page_size[1]
         for seg in segs:
             text = (seg.get("text") or "").strip()
             if not text or len(text) > MAX_CAPTION_CHARS:
@@ -283,7 +346,13 @@ def detect_figures(
             candidates: list[tuple[float, bool, list[float]]] = []
             for above in (preferred, not preferred):
                 region = _region(
-                    seg, segs, span, above=above, page_height=page_height, margin=margin
+                    seg,
+                    segs,
+                    span,
+                    above=above,
+                    page_height=page_height,
+                    page_width=page_width,
+                    margin=margin,
                 )
                 if region is not None:
                     candidates.append((_gap(seg, region, above), above, region))

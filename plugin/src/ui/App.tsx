@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSyncExternalStore } from "react";
+import { describeCounts, translationCounts } from "../counts";
 import type { ReaderController, UIState } from "../reader/controller";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { BilingualView } from "./BilingualView";
@@ -46,17 +47,14 @@ function PartialTranslationCard(props: {
   state: UIState;
 }): JSX.Element | null {
   const { controller, state } = props;
-  const total = state.segments.filter(
-    (segment) => segment.kind !== "reference" && segment.kind !== "figure" && segment.kind !== "noise",
-  ).length;
-  const translated = state.segments.filter((segment) => segment.translation).length;
-  if (state.translating || !total || translated === 0 || translated >= total) {
+  const counts = translationCounts(state.segments);
+  if (state.translating || !counts.total || counts.done === 0 || counts.done >= counts.total) {
     return null;
   }
   return (
     <div className="pl-card pl-small" style={{ margin: "8px 10px 0" }}>
       <strong>
-        已翻译 {translated}/{total} 段
+        已翻译 {counts.done}/{counts.total} 段
       </strong>
       <div className="pl-hint" style={{ marginTop: 2 }}>
         继续翻译只处理未译部分；重译全文会重新生成所有段落（会产生新费用）。
@@ -110,7 +108,7 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
     return () => doc?.removeEventListener("keydown", onKey);
   }, [controller, state.settingsOpen, state.glossaryOpen, state.translateDialogOpen]);
 
-  const translated = state.segments.filter((segment) => segment.translation).length;
+  const counts = translationCounts(state.segments);
   const progress = state.job?.progress;
   /**
    * While a job runs, the number that matters is that job's own progress.
@@ -126,12 +124,15 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
     ? Math.min(100, (jobDone / jobTotal) * 100)
     : jobTotal > 0 && state.job?.state === "succeeded"
       ? 100
-      : translated
-        ? 100
+      : // Otherwise the bar tracks how much of the *translatable* text is done.
+        // It used to jump to 100% as soon as any one paragraph had a
+        // translation, which contradicted the "105/112" printed beside it.
+        counts.total
+        ? (counts.done / counts.total) * 100
         : 0;
   const progressLabel = jobRunning
     ? `正在翻译第 ${progress?.page ?? state.page} 页 · ${jobDone}/${jobTotal} 段`
-    : `已翻译 ${translated}/${state.segments.length} 段`;
+    : `已翻译 ${describeCounts(counts)} 段`;
   // A disabled button with no explanation is indistinguishable from a broken one.
   const blockedReason = controller.translationBlockedReason();
 
@@ -270,9 +271,11 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           <span title={progressLabel}>
             {jobRunning
               ? `第 ${progress?.page ?? state.page} 页 · ${jobDone}/${jobTotal}`
-              : state.segments.length
-                ? `${translated}/${state.segments.length}`
-                : "未解析"}
+              : counts.total
+                ? describeCounts(counts)
+                : state.segments.length
+                  ? "无可译段落"
+                  : "未解析"}
           </span>
           {state.job?.layout && state.job.layout.state === "failed" ? (
             <span

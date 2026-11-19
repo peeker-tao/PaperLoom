@@ -33,6 +33,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "plugin attachment tests failed" }
     node test/selection.test.mjs
     if ($LASTEXITCODE -ne 0) { throw "plugin selection tests failed" }
+    node test/counts.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw "plugin count tests failed" }
     node esbuild.config.mjs
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
   }

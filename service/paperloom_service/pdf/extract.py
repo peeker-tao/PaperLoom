@@ -36,7 +36,11 @@ log = logging.getLogger("paperloom.pdf")
 # v8: a sentence interrupted by a display equation, a picture or a run-in label
 #     ("Training." / "Datasets.") is rejoined, and `(cid:N)` glyph runs are typed
 #     as formulas instead of being printed as one-line paragraphs.
-PARSER_VERSION = 9
+# v9: small-font notes under a figure, and a lone "SSIM ↑ LPIPS ↓" cell, are no
+#     longer read as body prose.
+# v10: a picture's crop grows sideways to cover its own narrow cells, so a
+#     table's outermost columns are no longer cut off.
+PARSER_VERSION = 10
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.

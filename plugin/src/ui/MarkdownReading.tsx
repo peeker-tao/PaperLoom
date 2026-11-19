@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { describeCounts, translationCounts } from "../counts";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Segment } from "../types";
 import { PageCrop } from "./PageCrop";
@@ -40,15 +41,9 @@ export function MarkdownReading(props: {
   );
 
   const referenceCount = state.segments.filter((s) => s.kind === "reference").length;
-  // Count both numbers over the same set, and exclude references the way the
-  // server does — otherwise the panel reads "97/96 段已译". Pictures are not
-  // translatable either, so counting them would make the progress look worse
-  // than it is.
-  const countable = state.segments.filter(
-    (s) => !HIDDEN_KINDS.has(s.kind) && s.kind !== "reference" && s.kind !== "figure",
-  );
-  const translated = countable.filter((s) => s.translation).length;
-  const translatable = countable.length;
+  // Counted with the same rule the translator uses, so this number agrees with
+  // the footer instead of quietly measuring something else.
+  const counts = translationCounts(state.segments);
 
   let lastPage = 0;
   const rows: JSX.Element[] = [];
@@ -86,7 +81,7 @@ export function MarkdownReading(props: {
     <div className="pl-md">
       <div className="pl-md__toolbar">
         <span className="pl-small pl-muted">
-          {translated}/{translatable} 段已译 · {state.segments.length} 段
+          {describeCounts(counts)} 段已译
         </span>
         <span style={{ flex: 1 }} />
         {referenceCount ? (
@@ -120,7 +115,7 @@ export function MarkdownReading(props: {
       <div className="pl-md__body">
         {/* "只显示译文" with nothing translated is a blank page. Say why, and
             offer the one click that fixes it. */}
-        {mode === "translated" && translated === 0 ? (
+        {mode === "translated" && counts.done === 0 ? (
           <div className="pl-card pl-card--warn pl-small" style={{ marginBottom: 12 }}>
             <strong>还没有任何译文</strong>
             <div style={{ marginTop: 4 }}>

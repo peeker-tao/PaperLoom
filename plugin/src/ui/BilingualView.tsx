@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { describeCounts, translationCounts } from "../counts";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Segment, Selection } from "../types";
 import type { RenderedPage } from "../zotero/api";
@@ -81,12 +82,15 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
   const noiseCount = state.segments.filter(
     (segment) => segment.page === state.page && segment.kind === "noise",
   ).length;
-  const translated = pageSegments.filter((segment) => segment.translation).length;
+  // "本页 3/9" counted noise blocks as work to do, so a fully translated page
+  // still read "3/9" next to a footer claiming a different denominator.
+  const pageCounts = translationCounts(pageSegments);
+  const paperCounts = translationCounts(state.segments);
   const overlayReady = layout === "overlay" && Boolean(image) && !renderFailed;
   // 版式视图 only draws *translations* on top of the page bitmap, so a page with
   // none shows nothing but the original page — which reads as "the translation
   // does not work" rather than "this page is not translated yet".
-  const pageUntranslated = pageSegments.length > 0 && translated === 0;
+  const pageUntranslated = pageCounts.total > 0 && pageCounts.done === 0;
   const blockedReason = controller.translationBlockedReason();
 
   const activeSegment = active ? pageSegments.find((item) => item.id === active) || null : null;
@@ -97,8 +101,8 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         <span className="pl-title">双语对照</span>
         <span className="pl-small pl-muted">
           {layout === "markdown"
-            ? `全文 ${state.segments.length} 段`
-            : `第 ${state.page} / ${document.pages} 页 · 本页 ${translated}/${pageSegments.length} 段已译`}
+            ? `全文 ${describeCounts(paperCounts)} 段已译`
+            : `第 ${state.page} / ${document.pages} 页 · 本页 ${describeCounts(pageCounts)} 段已译`}
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -197,7 +201,7 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
             <strong>第 {state.page} 页还没有译文</strong>
             <div style={{ marginTop: 4 }}>
               版式视图是把译文盖在原文页面上，所以这一页现在只能看到原始 PDF。本页共{" "}
-              {pageSegments.length} 段待译。
+              {pageCounts.total} 段待译。
             </div>
             <div className="pl-actions">
               <button
