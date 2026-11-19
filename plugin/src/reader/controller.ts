@@ -46,7 +46,7 @@ export const SIDEBAR_MAX_WIDTH = 960;
 export interface AnalysisState {
   kind: string;
   text: string;
-  status: "idle" | "streaming" | "done" | "error";
+  status: "idle" | "streaming" | "done" | "error" | "cancelled";
   error?: string;
   citations?: Citation[];
   model?: string;
@@ -1089,6 +1089,17 @@ export class ReaderController {
       }
     } finally {
       this.chatAbort = null;
+      // A stream can end without a `done` event (server restart, dropped socket).
+      // The message must not stay "streaming" forever: that left the send button
+      // disabled with no way to recover except reopening the reader.
+      this.patchAssistant(assistant.id, (current) =>
+        current.status === "streaming"
+          ? {
+              status: current.content ? "done" : "failed",
+              content: current.content || "（没有收到回复，请重试）",
+            }
+          : {},
+      );
       this.set({ streaming: false });
     }
   }
@@ -1357,6 +1368,34 @@ export class ReaderController {
     }
     this.set({ translating: true, error: null });
     try {
+      // A double-click, or the `withService` retry after a dropped response, can
+      // reach this line twice. Creating a second job would translate — and bill —
+      // the same pages again, so an in-flight job is adopted when it covers the
+      // same request. A *different* request is refused rather than silently
+      // replaced, because quietly translating something else is worse than an
+      // honest error.
+      const active = await this.findActiveJob(document.id);
+      if (active) {
+        const asked = pages && pages.length ? new Set(pages) : null;
+        const running = active.options?.pages ? new Set(active.options.pages) : null;
+        const sameRequest =
+          (asked === null && running === null) ||
+          (asked !== null &&
+            running !== null &&
+            asked.size === running.size &&
+            [...asked].every((page) => running.has(page)));
+        if (!sameRequest) {
+          this.set({
+            translating: false,
+            error: "已有一个翻译任务正在进行，请先取消它或等它完成",
+          });
+          return;
+        }
+        this.notice("该任务已在运行，正在接续显示进度");
+        this.set({ job: active });
+        await this.followJob(active.id);
+        return;
+      }
       const { job } = await this.withService(() =>
         this.host.service.client.startTranslation(document.id, {
           pages: pages && pages.length ? pages : null,
@@ -1367,6 +1406,18 @@ export class ReaderController {
       await this.followJob(job.id);
     } catch (error) {
       this.set({ translating: false, error: this.friendlyError(error) });
+    }
+  }
+
+  /** A queued/running job for this document, if any. */
+  private async findActiveJob(documentId: string): Promise<Job | null> {
+    try {
+      const { jobs } = await this.host.service.client.listJobs(documentId, 5);
+      return jobs.find((job) => job.state === "queued" || job.state === "running") || null;
+    } catch (error) {
+      // Best effort: if the listing fails, let job creation decide.
+      debug("listJobs failed", errorText(error));
+      return null;
     }
   }
 
@@ -1748,9 +1799,22 @@ export class ReaderController {
         }
       }
     } catch (error) {
-      if ((error as any)?.name !== "AbortError") {
+      if ((error as any)?.name === "AbortError") {
+        // Aborting is not an error, but it must still end the loading state —
+        // leaving `status: "streaming"` showed a spinner that never stopped.
+        this.patchAnalysis((current) => ({
+          status: "cancelled",
+          text: current.text,
+        }));
+      } else {
         this.patchAnalysis(() => ({ status: "error", error: this.friendlyError(error) }));
       }
+    } finally {
+      // A stream can end without a `done` event (network drop, server restart).
+      // Never leave the panel stuck on "生成中".
+      this.patchAnalysis((current) =>
+        current.status === "streaming" ? { status: current.text ? "done" : "cancelled" } : {},
+      );
     }
   }
 

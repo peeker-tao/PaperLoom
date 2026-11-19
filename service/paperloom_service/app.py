@@ -741,6 +741,9 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
             force=req.force,
             stale_only=req.stale_only,
             use_babeldoc=req.use_babeldoc,
+            # Idempotent for the same request: a duplicate create would translate
+            # the same pages twice and bill for both.
+            attach_existing=True,
         )
         return {"job": job}
 

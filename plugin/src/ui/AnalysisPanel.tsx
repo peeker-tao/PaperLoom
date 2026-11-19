@@ -69,7 +69,15 @@ export function AnalysisPanel(props: { controller: ReaderController; state: UISt
           <div className="pl-row pl-row--between" style={{ marginBottom: 6 }}>
             <strong>{KINDS.find((kind) => kind.id === analysis.kind)?.label || analysis.kind}</strong>
             <span className="pl-small pl-muted">
-              {analysis.status === "streaming" ? <Spinner /> : analysis.model || ""}
+              {analysis.status === "streaming" ? (
+                <Spinner />
+              ) : analysis.status === "cancelled" ? (
+                "已停止"
+              ) : analysis.status === "error" ? (
+                "失败"
+              ) : (
+                analysis.model || "完成"
+              )}
             </span>
           </div>
           {analysis.error ? <div className="pl-card pl-card--error pl-small">{analysis.error}</div> : null}

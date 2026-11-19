@@ -49,7 +49,24 @@ class JobManager:
         force: bool = False,
         stale_only: bool = False,
         use_babeldoc: bool | None = None,
+        attach_existing: bool = False,
     ) -> dict:
+        """Queue a translation job.
+
+        `attach_existing` makes this idempotent for the same request: if a job for
+        this document is already queued or running with the same page set, that
+        job is returned instead of creating a second one. A double-click, a retried
+        request after a dropped response, or two windows on the same paper would
+        otherwise translate (and bill) the same pages twice.
+
+        A *different* page set is still allowed, because translating page 5 while
+        page 1-3 is in flight is a legitimate thing to ask for; the client guards
+        against mixing them by accident.
+        """
+        if attach_existing:
+            existing = self.find_duplicate(document_id, pages)
+            if existing:
+                return existing
         job_id = uuid.uuid4().hex[:16]
         job = {
             "id": job_id,
@@ -72,6 +89,22 @@ class JobManager:
         self._emit(job_id, "job", self._snapshot(job_id))
         self._spawn(job_id)
         return self.db.get_job(job_id) or {}
+
+    def find_duplicate(self, document_id: str, pages: list[int] | None) -> dict | None:
+        """The in-flight job that already covers exactly this request, if any.
+
+        Page order is irrelevant (`[1, 2]` and `[2, 1]` are the same work), and
+        `None` (whole document) only matches `None`.
+        """
+        wanted = sorted(pages) if pages else None
+        for existing in self.db.list_jobs(document_id, limit=10):
+            if existing.get("state") not in ("queued", "running"):
+                continue
+            have = (existing.get("options") or {}).get("pages")
+            have = sorted(have) if have else None
+            if have == wanted:
+                return existing
+        return None
 
     def retry(self, job_id: str) -> dict:
         job = self.db.get_job(job_id)

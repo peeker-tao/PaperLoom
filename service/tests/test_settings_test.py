@@ -63,7 +63,8 @@ async def test_test_connection_rejects_an_unknown_model(client):
 
 
 async def test_the_typed_key_never_appears_in_the_response(client):
-    secret = "sk-abcdefghijklmnop-1234"
+    # Deliberately not shaped like a real key, so the repo secret scan stays useful.
+    secret = "sk-fake-key-for-tests-only"
     response = await client.post("/v1/settings/test", json={"apiKey": secret})
     assert secret not in response.text
 
@@ -71,9 +72,9 @@ async def test_the_typed_key_never_appears_in_the_response(client):
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        ("Authorization: Bearer sk-abcdefghijkl", "Authorization: Bearer ***"),
-        ("x-api-key: sk-abcdefghijkl", "x-api-key: ***"),
-        ("bad key sk-abcdefghijklmnop rejected", "bad key sk-*** rejected"),
+        ("Authorization: Bearer sk-fake-key-for-tests", "Authorization: Bearer ***"),
+        ("x-api-key: sk-fake-key-for-tests", "x-api-key: ***"),
+        ("bad key sk-fake-key-for-tests rejected", "bad key sk-*** rejected"),
         ("no secrets here", "no secrets here"),
     ],
 )
