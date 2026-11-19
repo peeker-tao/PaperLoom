@@ -142,15 +142,26 @@ MIGRATIONS: list[str] = [
     # Which configuration produced a translation. NULL means the row predates
     # this column ("unknown" provenance); user data is preserved.
     """ALTER TABLE segments ADD COLUMN translation_config TEXT;""",
-    # Images a user attached to a question, stored with the message so reopening
-    # a paper shows what was asked instead of a question about nothing.
-    """ALTER TABLE messages ADD COLUMN attachments TEXT;""",
     # Layout (BabelDOC) status is tracked separately from text translation so a
     # failed/absent engine never hides the usable text result.
     """ALTER TABLE jobs ADD COLUMN layout TEXT;""",
     # Segmentation output changes with parser fixes; the version makes stale
     # segment sets detectable instead of silently keeping them.
     """ALTER TABLE documents ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0;""",
+    # Targets are addressed by position (1-based), so migrating an existing file
+    # requires appending records in order: a new migration must go at the END of
+    # this list.
+    #
+    # Inserting one in the middle renumbers everything after it, and a database
+    # already at the old version then replays a script it has already run. That is
+    # not theoretical: adding this column before `layout` made the live service
+    # die on startup with "duplicate column name: parser_version", on a database
+    # that had been healthy for weeks — no test could see it, because tests always
+    # start from an empty file.
+    #
+    # Images a user attached to a question, stored with the message so reopening a
+    # paper shows what was asked instead of a question about nothing.
+    """ALTER TABLE messages ADD COLUMN attachments TEXT;""",
 ]
 
 
@@ -191,7 +202,16 @@ class Database:
             for index, script in enumerate(MIGRATIONS, start=1):
                 if index <= current:
                     continue
-                conn.executescript(script)
+                try:
+                    conn.executescript(script)
+                except sqlite3.OperationalError as exc:
+                    # `ALTER TABLE ... ADD COLUMN` is the one migration statement
+                    # that is not idempotent. Reaching it twice means the column
+                    # is already there — the intended end state — so treat it as
+                    # applied instead of refusing to start. Any other error is
+                    # real and must not be swallowed.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
                 conn.execute(
                     "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
