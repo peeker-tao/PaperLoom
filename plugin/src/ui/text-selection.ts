@@ -171,3 +171,76 @@ export function selectionOf(root: ShadowRoot | Document | null): SelectionLike |
     return null;
   }
 }
+
+/**
+ * The selection as it exists *inside* our shadow tree, or null.
+ *
+ * `document.getSelection()` reports the text of a shadow selection but retargets
+ * its nodes to the host element: `anchorNode` is the outer div and
+ * `getRangeAt(0)` describes the whole overlay, so the paragraph cannot be
+ * identified and the toolbar has no position. `Selection.getComposedRanges()`
+ * (Firefox 130+, reachable without types) returns the real nodes, which fixes
+ * both. A selection that is not ours — the PDF's own text layer — is rejected,
+ * so Zotero's popup and this toolbar cannot both open.
+ */
+export function shadowSelection(
+  root: ShadowRoot | Document | null,
+  owner: Node | null,
+): SelectionHit | null {
+  const selection = selectionOf(root) as
+    | (SelectionLike & {
+        getComposedRanges?: (options: { shadowRoots: ShadowRoot[] }) => unknown[];
+      })
+    | null;
+  if (!selection) {
+    return null;
+  }
+  let range: { startContainer?: Node; getBoundingClientRect?(): SelectionRect } | undefined;
+  try {
+    const composed =
+      root instanceof Object && "host" in (root as ShadowRoot)
+        ? selection.getComposedRanges?.({ shadowRoots: [root as ShadowRoot] })?.[0]
+        : undefined;
+    range =
+      (composed as typeof range) ||
+      (selection.getRangeAt?.(0) as unknown as typeof range) ||
+      undefined;
+  } catch {
+    range = undefined;
+  }
+  const anchor = range?.startContainer ?? selection.anchorNode ?? null;
+  if (anchor && owner && !inside(anchor, owner)) {
+    // Someone else's selection (the PDF text layer).
+    return null;
+  }
+  const source: SelectionLike = {
+    isCollapsed: selection.isCollapsed,
+    rangeCount: selection.rangeCount,
+    toString: () => selection.toString(),
+    anchorNode: anchor,
+    getRangeAt: () => ({
+      getBoundingClientRect: () =>
+        range?.getBoundingClientRect
+          ? range.getBoundingClientRect()
+          : (undefined as unknown as SelectionRect),
+    }),
+  };
+  return readSelectionFrom(source);
+}
+
+/** Is `node` inside our overlay? Answers for both real and retargeted nodes. */
+function inside(node: Node, owner: Node): boolean {
+  if (node === owner) {
+    return true;
+  }
+  let current: any = node;
+  let guard = 0;
+  while (current && guard < 60) {
+    guard += 1;
+    if (current === owner) {
+      return true;
+    }
+    current = current.parentNode || current.host || null;
+  }
+  return false;
+}

@@ -1,5 +1,13 @@
 export const SHADOW_CSS = `
-:host { all: initial; }
+:host {
+  all: initial;
+  /* Zotero's reader sets user-select: none on its own chrome. \`all: initial\`
+     leaves this at \`auto\`, whose used value follows the parent — so every
+     paragraph in the reading view inherited "not selectable" and dragging over
+     text did nothing at all. Opting in explicitly is what makes 划词 work. */
+  user-select: text;
+  -webkit-user-select: text;
+}
 .pl-root {
   /* One place for the whole palette. The reading view is a lot of small text on
      a light background, so the neutrals are slightly warm and the accent is a
@@ -37,6 +45,16 @@ export const SHADOW_CSS = `
   z-index: 2147483000;
 }
 .pl-root * { box-sizing: border-box; }
+/* Reading text is selectable even if some ancestor said otherwise; the chrome
+   around it is not, so a double click on a button never highlights its label. */
+.pl-root, .pl-md__body, .pl-md__en, .pl-md__zh, .pl-msg__text, .pl-msg__zh {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.pl-btn, .pl-tab, .pl-tabs, .pl-footer, .pl-chip, .pl-md__toolbar,
+.pl-md__figure-label, .pl-select, .pl-badge {
+  user-select: none;
+}
 /* Keyboard users get a visible ring; mouse users are not interrupted by one.
    :focus-visible is not honoured in every Gecko build Zotero ships, so the
    fallback keeps focus visible for real focus (not for programmatic .focus()). */

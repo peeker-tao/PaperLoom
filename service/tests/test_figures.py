@@ -164,3 +164,75 @@ def test_widening_never_swallows_a_neighbouring_column():
     assert len(figures) == 1
     # The far cell is not absorbed; only the breathing margin is added.
     assert figures[0]["bbox"][2] == 500.0 + PAD
+
+
+def test_a_long_caption_still_belongs_to_a_picture():
+    """Real captions list their sub-figures and run to several hundred chars.
+
+    A 400-character ceiling treated those as prose and dropped the picture: one
+    of the papers this was reported against lost four of its ten figures.
+    """
+    caption = "Fig. 2: (a) Absolute Recovery: " + "solid lines depict the trend. " * 24
+    assert len(caption) > 400
+    segments = [
+        seg("p1-s0", 1, "caption", caption, [40, 380, 560, 500]),
+        seg("p1-s1", 1, "body", "Text below the caption.", [40, 300, 560, 360]),
+    ]
+    figures = detect_figures(segments, {1: (595.0, 792.0)})
+    assert len(figures) == 1
+    assert figures[0]["before"] == "p1-s0"
+
+
+def test_prose_that_mentions_a_table_is_still_rejected_when_it_is_long():
+    """The length ceiling used to hide this case; the wording rule must hold."""
+    prose = "Table 1 shows the results on DrawBench. " * 20
+    assert len(prose) > 400
+    segments = [
+        seg("p1-s0", 1, "body", prose, [40, 700, 560, 720]),
+        seg("p1-s1", 1, "body", "More prose.", [40, 660, 560, 680]),
+    ]
+    assert detect_figures(segments, {1: (595.0, 792.0)}) == []
+
+
+def test_a_running_head_does_not_end_the_picture():
+    """The author line at the top of the page is not content.
+
+    Treating it as the boundary cut a plot down to its axis labels; the crop
+    must reach the page margin instead.
+    """
+    segments = [
+        seg("p1-s0", 1, "body", "W. Zhou et al.", [40, 762, 300, 772]),
+        seg("p1-s1", 1, "noise", "DINOv2", [80, 700, 140, 710]),
+        seg("p1-s2", 1, "noise", "iBOT", [80, 680, 140, 690]),
+        seg("p1-s3", 1, "caption", "Fig. 2: Absolute Recovery.", [40, 500, 560, 520]),
+    ]
+    figures = detect_figures(segments, {1: (595.0, 792.0)})
+    assert len(figures) == 1
+    # Reaches past the labels, up to the page's top text margin (792 - 72).
+    assert figures[0]["bbox"][3] >= 719.0
+
+
+def test_a_picture_beside_a_paragraph_is_still_found():
+    """One column of a two-column page: the wide span covers the prose beside it.
+
+    Half the column — the side the caption sits on — is the answer, and refusing
+    the wide span must not mean refusing the picture.
+    """
+    segments = [
+        seg(
+            "p1-s0",
+            1,
+            "body",
+            "Prose that runs the full height of the left column.",
+            [40, 200, 200, 700],
+        ),
+        seg("p1-s1", 1, "caption", "Fig. 8: Subspace Stability.", [300, 380, 560, 420]),
+        seg("p1-s2", 1, "body", "Text under the right column.", [300, 200, 560, 260]),
+    ]
+    figures = detect_figures(segments, {1: (595.0, 792.0)})
+    assert len(figures) == 1
+    x0, _y0, x1, _y1 = figures[0]["bbox"]
+    # The crop stays on the caption's side of the gutter (300, less the margin).
+    assert x0 >= 280.0
+    assert x1 <= 560.0 + PAD
+

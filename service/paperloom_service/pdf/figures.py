@@ -34,21 +34,41 @@ MIN_FIGURE_HEIGHT = 55.0
 # it would cover most of the sheet and hide the text underneath.
 MAX_FIGURE_PAGE_SHARE = 0.8
 # A caption longer than this is a paragraph that happens to start with "Figure".
-MAX_CAPTION_CHARS = 400
+# Real captions are long: a caption that lists its sub-figures ("(a) ... (b) ...")
+# runs to 600-900 characters in the papers this was measured on, and the old
+# 400-character ceiling threw away four of the ten pictures in one of them. The
+# prose case is caught by CAPTION_CONTINUATION_RE instead ("Table 1 shows ...").
+MAX_CAPTION_CHARS = 1200
 # Kinds that are part of the thing being drawn rather than text that would be
 # covered by it. A table *is* a run of cells, and a chart's axis labels are
 # short fragments: refusing the region because of them meant no table was ever
 # shown, which is worse than showing a picture that contains its own labels.
 ABSORB_KINDS = {"table", "noise", "formula", "meta"}
 # Text blocks closer than this belong to the same visual group. Table rows sit
-# about one line apart, so this has to cover normal leading.
-JOIN_GAP = 20.0
+# about one line apart, and a chart's tick labels are separated by its own
+# whitespace, so the gap has to cover both — at 20pt a 21pt gap between a plot's
+# axis label and its frame ended the group early and the picture was cut to a
+# strip of numbers. Only drawing parts (cells, labels, equations) are absorbed
+# across it, never prose.
+JOIN_GAP = 30.0
 # Whitespace kept around the drawing on both sides. Text boxes end at the last
 # glyph, while a table's rules and filled cells continue past it — 8.5pt in the
 # paper that exposed this — so a crop measured on text alone decapitates the
 # outermost column. Padding is dropped again if it would reach neighbouring
 # prose, so this cannot grow a crop into the next column.
 FIGURE_EDGE_PAD = 12.0
+# A single short line inside this band at the very top or bottom of the sheet is
+# a running head/foot ("W. Zhou et al."), not body text. Treating it as content
+# ended a figure at the author line: the plot above the caption was cut down to
+# its axis labels, and a full-page picture was refused altogether.
+RUNNING_BAND = 40.0
+RUNNING_MAX_HEIGHT = 26.0
+# How close the topmost drawing part must already be to the page margin before
+# the crop is allowed to run all the way there. Keeps a small table from
+# dragging in a page's worth of white space.
+MARGIN_REACH = 160.0
+# A caption narrower than this share of the text column labels a narrow drawing.
+NARROW_CAPTION_SHARE = 0.7
 
 
 def _by_page(segments: list[dict]) -> dict[int, list[dict]]:
@@ -56,6 +76,22 @@ def _by_page(segments: list[dict]) -> dict[int, list[dict]]:
     for seg in segments:
         pages.setdefault(int(seg["page"]), []).append(seg)
     return pages
+
+
+def _is_running_line(seg: dict, page_height: float) -> bool:
+    if not page_height:
+        return False
+    if seg.get("kind") == "caption":
+        return False
+    _x0, y0, _x1, y1 = seg["bbox"]
+    if (y1 - y0) > RUNNING_MAX_HEIGHT:
+        return False
+    return y1 >= page_height - RUNNING_BAND or y0 <= RUNNING_BAND
+
+
+def _content_blocks(segments: list[dict], page_height: float) -> list[dict]:
+    """The blocks that are page content — running heads and feet removed."""
+    return [seg for seg in segments if not _is_running_line(seg, page_height)]
 
 
 def _top_margin(
@@ -73,8 +109,9 @@ def _top_margin(
     gaps = []
     for page, segs in _by_page(segments).items():
         height = (page_sizes.get(page) or (0.0, 0.0))[1]
-        if height and segs:
-            gaps.append(height - max(seg["bbox"][3] for seg in segs))
+        content = _content_blocks(segs, height)
+        if height and content:
+            gaps.append(height - max(seg["bbox"][3] for seg in content))
     if not gaps:
         return 45.0
     return min(max(min(gaps), 18.0), 72.0)
@@ -103,7 +140,47 @@ def _column_span(segments: list[dict]) -> tuple[float, float]:
     )
 
 
-def _neighbour_top(caption: dict, segments: list[dict], span: tuple[float, float]):
+def _candidate_spans(caption: dict, segments: list[dict]) -> list[tuple[float, float]]:
+    """Horizontal extents worth trying for this caption, widest first.
+
+    The page's text column is the safe choice for a full-width figure. But a
+    picture that occupies one column of a two-column page — caption and drawing
+    on the right, prose on the left — fails there: the neighbouring paragraph is
+    inside the region, so the crop is refused and the picture is simply missing.
+    Half the column (the side the caption sits on) and the caption's own width
+    are the two narrower answers, in that order: the half column still covers a
+    drawing that fills its column, while the caption's width can clip one.
+    """
+    cb = caption["bbox"]
+    wide = _column_span(segments)
+    spans: list[tuple[float, float]] = []
+    width = wide[1] - wide[0]
+    middle = (wide[0] + wide[1]) / 2
+    caption_mid = (cb[0] + cb[2]) / 2
+    caption_width = cb[2] - cb[0]
+    half = (wide[0], middle) if caption_mid < middle else (middle, wide[1])
+    # A caption clearly narrower than the column labels a narrow drawing, so its
+    # own side of the gutter is tried first — otherwise the wide span's *other*
+    # direction can win on height and crop the whitespace under the caption.
+    if width and caption_width < width * NARROW_CAPTION_SHARE:
+        narrower = [half, (cb[0], cb[2]), wide]
+    else:
+        narrower = [wide, half, (cb[0], cb[2])]
+    for span in narrower:
+        if span[1] - span[0] < MIN_FIGURE_WIDTH:
+            continue
+        if any(abs(span[0] - other[0]) < 1.0 and abs(span[1] - other[1]) < 1.0 for other in spans):
+            continue
+        spans.append(span)
+    return spans
+
+
+def _neighbour_top(
+    caption: dict,
+    segments: list[dict],
+    span: tuple[float, float],
+    page_height: float | None = None,
+):
     """Where the picture area ends, going up from the caption.
 
     A prose block above the picture is the boundary: the region stops at its
@@ -126,12 +203,21 @@ def _neighbour_top(caption: dict, segments: list[dict], span: tuple[float, float
     if first.get("kind") not in ABSORB_KINDS:
         return first["bbox"][1]
     reach = first["bbox"][3]
+    consumed = 1
     for seg in above[1:]:
         if seg.get("kind") not in ABSORB_KINDS:
             break
         if seg["bbox"][1] > reach + JOIN_GAP:
             break
         reach = max(reach, seg["bbox"][3])
+        consumed += 1
+    # Nothing but drawing parts above the caption: the picture may run all the
+    # way to the page margin. Stopping at the last label cut plots off at their
+    # axis text — the reader saw a strip of numbers. This is only believed when
+    # the drawing already reaches near the margin; otherwise the region would
+    # swallow a large empty area above a small table.
+    if consumed == len(above) and page_height and page_height - reach <= MARGIN_REACH:
+        return None
     return reach
 
 
@@ -268,7 +354,7 @@ def _region(
     x0, x1 = span
     cb = caption["bbox"]
     if above:
-        edge = _neighbour_top(caption, segments, span)
+        edge = _neighbour_top(caption, segments, span, page_height)
         if edge is None:
             if page_height is None:
                 return None
@@ -320,12 +406,14 @@ def detect_figures(
     """
     figures: list[dict] = []
     margin = _top_margin(segments, page_sizes)
-    for page, segs in _by_page(segments).items():
-        span = _column_span(segs)
-        if span[1] - span[0] < MIN_FIGURE_WIDTH:
-            continue
+    for page, raw_segs in _by_page(segments).items():
         page_size = (page_sizes or {}).get(page, (0.0, 0.0))
         page_width, page_height = page_size[0], page_size[1]
+        # Running heads and feet are not content: they must not end a figure,
+        # and they must not disqualify a region for "having text inside".
+        segs = _content_blocks(raw_segs, page_height)
+        if _column_span(segs)[1] - _column_span(segs)[0] < MIN_FIGURE_WIDTH:
+            continue
         for seg in segs:
             text = (seg.get("text") or "").strip()
             if not text or len(text) > MAX_CAPTION_CHARS:
@@ -343,23 +431,27 @@ def detect_figures(
             # a plausible-looking answer, so preference goes to the tighter
             # crop: that is the block the caption actually labels.
             preferred = not is_table
-            candidates: list[tuple[float, bool, list[float]]] = []
-            for above in (preferred, not preferred):
-                region = _region(
-                    seg,
-                    segs,
-                    span,
-                    above=above,
-                    page_height=page_height,
-                    page_width=page_width,
-                    margin=margin,
-                )
-                if region is not None:
-                    candidates.append((_gap(seg, region, above), above, region))
-            if not candidates:
+            region = None
+            for span in _candidate_spans(seg, segs):
+                candidates: list[tuple[float, bool, list[float]]] = []
+                for above in (preferred, not preferred):
+                    found = _region(
+                        seg,
+                        segs,
+                        span,
+                        above=above,
+                        page_height=page_height,
+                        page_width=page_width,
+                        margin=margin,
+                    )
+                    if found is not None:
+                        candidates.append((_gap(seg, found, above), above, found))
+                if candidates:
+                    candidates.sort(key=lambda item: (item[0], item[1] != preferred))
+                    region = candidates[0][2]
+                    break
+            if region is None:
                 continue
-            candidates.sort(key=lambda item: (item[0], item[1] != preferred))
-            region = candidates[0][2]
             # Safety net: a region covering most of the sheet means the guess
             # went wrong (it would hide the text the reader needs).
             if page_height and (region[3] - region[1]) > page_height * MAX_FIGURE_PAGE_SHARE:

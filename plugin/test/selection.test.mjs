@@ -26,7 +26,7 @@ await esbuild.build({
   outfile: bundle,
   logLevel: "silent",
 });
-const { clampSelectionText, isEditableNode, segmentIdOf, readSelectionFrom, MAX_SELECTION_CHARS } =
+const { clampSelectionText, isEditableNode, segmentIdOf, readSelectionFrom, shadowSelection, MAX_SELECTION_CHARS } =
   await import(pathToFileURL(bundle).href);
 
 let failures = 0;
@@ -162,6 +162,83 @@ test("isEditableNode looks through wrappers", () => {
   const wrapper = node({ tagName: "DIV", parentNode: area });
   assert.equal(isEditableNode(wrapper), true);
   assert.equal(isEditableNode(node()), false);
+});
+
+test("a shadow selection resolves through getComposedRanges", () => {
+  const host = node({ tagName: "DIV", parentNode: null });
+  const paragraph = node({ parentNode: host, dataset: { segmentId: "p2-s3" } });
+  const text = node({ tagName: "#text", parentNode: paragraph });
+  const selection = {
+    isCollapsed: false,
+    rangeCount: 1,
+    toString: () => "modality invariant matching",
+    // Gecko retargets these to the host; the composed range gives the real node.
+    anchorNode: host,
+    getRangeAt: () => ({ getBoundingClientRect: () => ({ top: 100, left: 20, bottom: 120, right: 200 }) }),
+    getComposedRanges: () => [
+      {
+        startContainer: text,
+        getBoundingClientRect: () => ({ top: 100, left: 20, bottom: 120, right: 200 }),
+      },
+    ],
+  };
+  const root = { host, ownerDocument: { getSelection: () => selection } };
+  const hit = shadowSelection(root, host);
+  assert.equal(hit.text, "modality invariant matching");
+  assert.equal(hit.segmentId, "p2-s3");
+  assert.equal(hit.rect.top, 100);
+});
+
+test("a selection outside the overlay is ignored", () => {
+  // The PDF's own text layer: Zotero already offers a popup there.
+  const host = node({ tagName: "DIV", parentNode: null });
+  const pdfText = node({ tagName: "#text", parentNode: node({ parentNode: null }) });
+  const selection = {
+    isCollapsed: false,
+    rangeCount: 1,
+    toString: () => "text from the pdf",
+    anchorNode: pdfText,
+    getRangeAt: () => ({ getBoundingClientRect: () => ({ top: 1, left: 1 }) }),
+    getComposedRanges: () => [{ startContainer: pdfText }],
+  };
+  const root = { host, ownerDocument: { getSelection: () => selection } };
+  assert.equal(shadowSelection(root, host), null);
+});
+
+test("without getComposedRanges the retargeted host still counts as ours", () => {
+  // Older engines report only the host; the text is still usable, the segment is not.
+  const host = node({ tagName: "DIV", parentNode: null });
+  const selection = {
+    isCollapsed: false,
+    rangeCount: 1,
+    toString: () => "selected words",
+    anchorNode: host,
+    getRangeAt: () => ({ getBoundingClientRect: () => ({ top: 40, left: 10 }) }),
+  };
+  const root = { host, ownerDocument: { getSelection: () => selection } };
+  const hit = shadowSelection(root, host);
+  assert.equal(hit.text, "selected words");
+  assert.equal(hit.segmentId, null);
+});
+
+test("a collapsed selection never opens the toolbar", () => {
+  const host = node({ tagName: "DIV", parentNode: null });
+  const selection = {
+    isCollapsed: true,
+    rangeCount: 1,
+    toString: () => "",
+    anchorNode: host,
+    getRangeAt: () => ({ getBoundingClientRect: () => ({ top: 1, left: 1 }) }),
+  };
+  const root = { host, ownerDocument: { getSelection: () => selection } };
+  assert.equal(shadowSelection(root, host), null);
+});
+
+test("no selection at all is handled", () => {
+  const host = node({ tagName: "DIV", parentNode: null });
+  const root = { host, ownerDocument: { getSelection: () => null } };
+  assert.equal(shadowSelection(root, host), null);
+  assert.equal(shadowSelection(null, null), null);
 });
 
 if (failures) {

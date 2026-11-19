@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { debug } from "../log";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Selection } from "../types";
-import { readSelectionFrom, selectionOf, type SelectionHit } from "./text-selection";
+import { shadowSelection, type SelectionHit } from "./text-selection";
 
 /**
  * Floating toolbar for a selection made inside the sidebar.
@@ -38,17 +39,22 @@ export function SelectionToolbar(props: {
       return;
     }
     const root = node.getRootNode() as ShadowRoot | Document;
+    const doc = (node.ownerDocument || (root as Document)) as Document;
+    // The overlay's shadow host: anything selected outside it is the PDF's own
+    // text layer, which Zotero already offers a popup for.
+    const owner: Node = (root as ShadowRoot).host || node;
 
     const read = () => {
       // A modal is a different task; a toolbar over it would be noise.
       if (blockedRef.current) {
         return;
       }
-      const next = readSelectionFrom(selectionOf(root));
+      const next = shadowSelection(root, owner);
       if (!next) {
         setHit(null);
         return;
       }
+      debug("selection read", next.text.length, next.segmentId || "no-segment");
       setHit(next);
       // Publish the selection immediately, so typing in the composer asks about
       // *this* paragraph and the scope chip is already correct. Writing it to the
@@ -77,6 +83,16 @@ export function SelectionToolbar(props: {
         setTimeout(read, 0);
       }
     };
+    // `selectionchange` is the one signal the host application cannot swallow:
+    // it is fired, not dispatched, so a capture-phase handler in Zotero's reader
+    // (which does stop pointer events on its own layers) cannot cancel it. When
+    // only pointerup was listened for, dragging over a paragraph occasionally
+    // did nothing at all.
+    const onSelectionChange = () => {
+      // The event fires on every caret move too; the reader rejects collapsed
+      // selections, so this is safe. Deferred so Gecko has updated the range.
+      setTimeout(read, 0);
+    };
     // The rect is captured at selection time; once the text moves, the toolbar
     // would point at the wrong place.
     const onScroll = () => setHit(null);
@@ -84,10 +100,12 @@ export function SelectionToolbar(props: {
     root.addEventListener("pointerup", onPointerUp, true);
     root.addEventListener("keyup", onKeyUp, true);
     root.addEventListener("scroll", onScroll, true);
+    doc.addEventListener("selectionchange", onSelectionChange, true);
     return () => {
       root.removeEventListener("pointerup", onPointerUp, true);
       root.removeEventListener("keyup", onKeyUp, true);
       root.removeEventListener("scroll", onScroll, true);
+      doc.removeEventListener("selectionchange", onSelectionChange, true);
     };
   }, [controller]);
 

@@ -40,7 +40,11 @@ log = logging.getLogger("paperloom.pdf")
 #     longer read as body prose.
 # v10: a picture's crop grows sideways to cover its own narrow cells, so a
 #     table's outermost columns are no longer cut off.
-PARSER_VERSION = 10
+# v11: more pictures are found — a caption that lists its sub-figures is no
+#     longer mistaken for prose, a running head no longer ends the crop, and a
+#     drawing that sits in one column of a two-column page is cut on its own
+#     side of the gutter.
+PARSER_VERSION = 11
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
