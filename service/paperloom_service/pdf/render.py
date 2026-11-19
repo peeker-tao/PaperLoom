@@ -122,25 +122,44 @@ def _render_uncached(
             if page < 1 or page > len(document):
                 raise ValueError(f"页码超出范围：{page}")
             pdf_page = document[page - 1]
-            page_width, page_height = pdf_page.get_size()
-            if not page_width or not page_height:
+            size_width, size_height = pdf_page.get_size()
+            if not size_width or not size_height:
                 raise ValueError("无法读取页面尺寸")
+            rotation = int(pdf_page.get_rotation() or 0) % 360
+            # `get_size()` reports the page *as displayed*, so for a rotated page
+            # the reported width is the unrotated height. Both are needed: the
+            # scale comes from the displayed width, the crop from the unrotated
+            # frame (which is where pdfminer's bboxes live).
+            if rotation in (90, 270):
+                page_width, page_height = size_height, size_width
+            else:
+                page_width, page_height = size_width, size_height
             # A crop is rendered at a higher scale than a whole page: the region
             # is small, so the same pixel width means more detail.
             requested = _clamp(float(width or DEFAULT_WIDTH), MIN_WIDTH, MAX_WIDTH)
             scale = _clamp(requested / page_width, 0.2, MAX_SCALE)
             if bbox:
-                region_width = max(1.0, bbox[2] - bbox[0])
+                # Width of the requested region *after* rotation: for a quarter
+                # turn the visual width is the unrotated height.
+                if rotation in (90, 270):
+                    region_width = max(1.0, bbox[3] - bbox[1])
+                else:
+                    region_width = max(1.0, bbox[2] - bbox[0])
                 scale = _clamp(requested / region_width, 0.2, MAX_SCALE)
             bitmap = pdf_page.render(scale=scale)
             image = bitmap.to_pil()
             if bbox:
-                x0, y0, x1, y1 = bbox
-                left = max(0, round(x0 * scale))
-                right = min(image.width, round(x1 * scale))
-                # PDF y grows upwards, bitmaps grow downwards.
-                top = max(0, round((page_height - y1) * scale))
-                bottom = min(image.height, round((page_height - y0) * scale))
+                left, top, right, bottom = _crop_box(
+                    bbox,
+                    page_width=page_width,
+                    page_height=page_height,
+                    rotation=rotation,
+                    scale=scale,
+                )
+                left = max(0, left)
+                top = max(0, top)
+                right = min(image.width, right)
+                bottom = min(image.height, bottom)
                 if right - left < 2 or bottom - top < 2:
                     raise ValueError("裁切区域过小")
                 image = image.crop((left, top, right, bottom))
@@ -149,6 +168,50 @@ def _render_uncached(
             return buffer.getvalue()
         finally:
             document.close()
+
+
+def _crop_box(
+    bbox: tuple[float, float, float, float],
+    *,
+    page_width: float,
+    page_height: float,
+    rotation: int,
+    scale: float,
+) -> tuple[int, int, int, int]:
+    """Map a bbox in PDF space onto pixel coordinates of the rendered bitmap.
+
+    Two coordinate changes happen between a text bbox and a pixel:
+
+    * PDF space grows upwards, bitmaps grow downwards.
+    * A page may carry ``/Rotate``. pdfium renders it upright — so for a page
+      rotated 90° the bitmap is *taller* than it is wide, while the bbox (which
+      comes from pdfminer, which ignores rotation) is still expressed in the
+      unrotated frame.
+
+    The previous version assumed rotation 0. On a rotated page that did not fail
+    loudly: it cropped a plausible-looking rectangle out of the wrong place, so a
+    figure appeared as an unrelated strip of the page. The four cases below were
+    measured against real renders rather than derived on paper.
+
+    ``page_width``/``page_height`` are the *unrotated* size; ``scale`` turns PDF
+    units into pixels.
+    """
+    x0, y0, x1, y1 = bbox
+    turned = rotation % 360
+    if turned == 90:
+        left, top, right, bottom = y0, x0, y1, x1
+    elif turned == 180:
+        left, top, right, bottom = page_width - x1, y0, page_width - x0, y1
+    elif turned == 270:
+        left, top, right, bottom = page_height - y1, page_width - x1, page_height - y0, page_width - x0
+    else:
+        left, top, right, bottom = x0, page_height - y1, x1, page_height - y0
+    return (
+        round(left * scale),
+        round(top * scale),
+        round(right * scale),
+        round(bottom * scale),
+    )
 
 
 def parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:

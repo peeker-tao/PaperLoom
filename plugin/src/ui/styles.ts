@@ -230,7 +230,16 @@ export const SHADOW_CSS = `
 }
 .pl-composer__row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
 .pl-textarea { width: 100%; min-height: 60px; max-height: 160px; resize: vertical; line-height: 1.5; }
-.pl-composer__bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }
+/* The sidebar can be as narrow as 300px, and the composer now holds three
+   controls plus send. Both rows wrap, so nothing is pushed off the edge — the
+   send button used to end up outside the panel at the narrow end. */
+.pl-composer__bottom {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-top: 6px; gap: 8px; flex-wrap: wrap;
+}
+.pl-composer__bottom > .pl-row { flex-wrap: wrap; min-width: 0; }
+/* margin-left:auto keeps send on the right on whichever line it lands. */
+.pl-composer__bottom > .pl-row:last-child { flex: 0 0 auto; margin-left: auto; }
 .pl-chip {
   display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
   background: #f3f6f3; border: 1px solid #dbe5df; color: #45514c;
@@ -246,11 +255,11 @@ export const SHADOW_CSS = `
   scrollbar-width: thin;
 }
 .pl-attach__item {
-  position: relative; flex: 0 0 auto; width: 66px;
+  position: relative; flex: 0 0 auto; width: 78px;
   display: flex; flex-direction: column; gap: 3px;
 }
 .pl-attach__thumb {
-  width: 66px; height: 66px; object-fit: cover; border-radius: var(--pl-radius-sm);
+  width: 78px; height: 62px; object-fit: cover; border-radius: var(--pl-radius-sm);
   border: 1px solid var(--pl-border); background: #f2f0ea; display: block;
 }
 .pl-attach__remove {
@@ -262,7 +271,7 @@ export const SHADOW_CSS = `
 }
 .pl-attach__remove:hover { background: #fdeceb; border-color: #e5b4b0; color: #a33b33; }
 .pl-attach__caption {
-  width: 66px; font-size: 10.5px; padding: 2px 4px; border-radius: 5px;
+  width: 78px; font-size: 10.5px; padding: 2px 4px; border-radius: 5px;
   border: 1px solid var(--pl-border); background: #fff; color: var(--pl-fg);
 }
 .pl-attach__caption::placeholder { color: var(--pl-faint); }
@@ -483,6 +492,46 @@ export const SHADOW_CSS = `
 }
 .pl-md__figure-fallback { cursor: pointer; }
 .pl-md__figure-fallback:hover { border-color: #c9c5b6; color: var(--pl-fg-soft); }
+/* When both render paths fail the reason and the two ways out are shown here,
+   so a missing figure is a dead end that says why. */
+.pl-md__figure-failed {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 12px; border: 1px dashed var(--pl-border);
+  border-radius: var(--pl-radius-sm); background: #faf9f5; color: var(--pl-fg-soft);
+}
+.pl-md__figure-failed .pl-actions { margin-top: 0; }
+
+/* ---- zoom overlay ------------------------------------------------------ */
+/* A fixed layer rather than a route: the reading position must not move while
+   a picture is being looked at. */
+.pl-zoom {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(24, 27, 26, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  padding: 18px;
+  animation: pl-fade-in 0.14s ease-out;
+}
+@keyframes pl-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.pl-zoom__panel {
+  display: flex; flex-direction: column; max-width: 100%; max-height: 100%;
+  background: #fff; border-radius: var(--pl-radius);
+  box-shadow: var(--pl-shadow-3); overflow: hidden;
+}
+.pl-zoom__bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 10px; border-bottom: 1px solid var(--pl-border-soft); background: #faf9f5;
+}
+.pl-zoom__canvas {
+  overflow: auto; padding: 10px; background: #f2f0ea;
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.pl-zoom__canvas img {
+  max-width: 100%; height: auto; display: block; background: #fff;
+  box-shadow: var(--pl-shadow-1); border-radius: 3px;
+}
 .pl-md__para:hover, .pl-md__heading:hover { background: #f5f7f3; }
 .pl-md__para.active, .pl-md__heading.active {
   background: var(--pl-accent-weak); box-shadow: inset 3px 0 0 var(--pl-accent);

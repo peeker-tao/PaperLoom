@@ -287,7 +287,7 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
                 </button>
                 <input
                   className="pl-attach__caption"
-                  placeholder="说明（可选）"
+                  placeholder="说明"
                   aria-label="图片说明"
                   value={image.caption}
                   onChange={(event) => controller.setAttachmentCaption(image.id, event.target.value)}

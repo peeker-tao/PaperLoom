@@ -117,3 +117,71 @@ def test_identical_requests_are_served_from_the_cache(pdf_path):
     # A different width is a different bitmap, not a cache hit.
     other = render_page_png(pdf_path, 1, width=800)
     assert other != first
+
+
+# ------------------------------------------------------------------ rotation
+
+# A 200x100 page with a red block at PDF coordinates (10..30, 10..30) — the
+# bottom-left corner in PDF space. Cropping that bbox must return a red picture
+# whatever the page rotation, which is the only check that can tell "the crop
+# followed the rotation" from "the crop landed somewhere plausible".
+MARKER_PAGE = b"""%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]%(rot)s/Contents 4 0 R>>endobj
+4 0 obj<</Length 29>>stream
+1 0 0 rg 10 10 20 20 re f
+endstream
+endobj
+trailer<</Root 1 0 R>>
+"""
+
+
+def marker_pdf(path, rotation: int):
+    body = MARKER_PAGE.replace(b"%(rot)s", f"/Rotate {rotation}".encode())
+    path.write_bytes(body)
+    return path
+
+
+def redness(png: bytes) -> float:
+    """Share of pixels that are strongly red (the marker) in a rendered crop."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(png)) as image:
+        pixels = list(image.convert("RGB").getdata())
+    red = sum(1 for r, g, b in pixels if r > 120 and g < 100 and b < 100)
+    return red / max(1, len(pixels))
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_a_crop_follows_the_page_rotation(tmp_path, rotation):
+    from paperloom_service.pdf.render import clear_cache, render_page_png
+
+    clear_cache()
+    path = marker_pdf(tmp_path / f"rot{rotation}.pdf", rotation)
+    crop = render_page_png(path, 1, width=200, bbox=(10.0, 10.0, 30.0, 30.0))
+    assert redness(crop) > 0.9, f"rotation {rotation}: the crop missed the marker"
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_a_crop_of_empty_space_stays_empty(tmp_path, rotation):
+    """The other half of the check: rotation must not make white areas red."""
+    from paperloom_service.pdf.render import clear_cache, render_page_png
+
+    clear_cache()
+    path = marker_pdf(tmp_path / f"rot{rotation}.pdf", rotation)
+    crop = render_page_png(path, 1, width=200, bbox=(100.0, 40.0, 160.0, 90.0))
+    assert redness(crop) < 0.01, f"rotation {rotation}: the crop caught the marker"
+
+
+def test_a_rotated_page_can_be_rendered_whole(tmp_path):
+    from paperloom_service.pdf.render import clear_cache, render_page_png
+
+    clear_cache()
+    path = marker_pdf(tmp_path / "rot90.pdf", 90)
+    whole = render_page_png(path, 1, width=200)
+    width, height = png_size(whole)
+    # Rotated 90 degrees, the 200x100 page displays as 100x200.
+    assert height > width
