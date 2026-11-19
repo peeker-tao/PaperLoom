@@ -65,6 +65,28 @@ export interface NoteSummary {
   snippet: string;
 }
 
+/**
+ * A paragraph's rectangle in PDF user space, or null when it cannot be trusted.
+ *
+ * Merged paragraphs and figures sometimes carry a box that spans a whole column
+ * or page; scrolling to that is the same as scrolling to the page, and a
+ * degenerate box would throw the viewer off. Both are filtered here.
+ */
+function segmentBBox(segment: Segment): [number, number, number, number] | null {
+  const box = segment.bbox as [number, number, number, number] | undefined;
+  if (!box || box.length !== 4) {
+    return null;
+  }
+  const [x0, y0, x1, y1] = box;
+  if (![x0, y0, x1, y1].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+  if (x1 <= x0 || y1 <= y0) {
+    return null;
+  }
+  return [x0, y0, x1, y1];
+}
+
 export interface UIState {
   ready: boolean;
   loading: boolean;
@@ -102,6 +124,12 @@ export interface UIState {
   translationStatus: TranslationStatus | null;
   /** Segment briefly highlighted after a citation/segment jump. */
   highlight: string | null;
+  /**
+   * True when a jump into the PDF hid the reading layer, so the UI can offer
+   * "返回译文" — without it the user is stranded in the PDF with no way back to
+   * the position they were reading.
+   */
+  canReturnToTranslation: boolean;
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -141,6 +169,7 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     analysisModel: "",
     translationStatus: null,
     highlight: null,
+    canReturnToTranslation: false,
   };
 }
 
@@ -165,6 +194,12 @@ export class ReaderController {
   private highlightTimer: ReturnType<typeof setTimeout> | null = null;
   private pageHandler: ((event: any) => void) | null = null;
   private destroyed = false;
+  /**
+   * Where the translation layer was before a jump into the PDF, so 返回译文 can
+   * resume there instead of starting over at the top of the paper.
+   */
+  private translationReturn: { page: number; segmentId: string | null; scrollTop: number } | null =
+    null;
   private noteIndex: { get(): Record<string, string>; set(value: Record<string, string>): void };
 
   constructor(
@@ -499,7 +534,17 @@ export class ReaderController {
   }
 
   toggleBilingual(open?: boolean): void {
-    this.set({ bilingualOpen: open ?? !this.state.bilingualOpen });
+    const next = open ?? !this.state.bilingualOpen;
+    // Opening the layer by hand consumes any pending "返回译文" marker: the user
+    // is already back, so the prompt would be stale.
+    this.set({
+      bilingualOpen: next,
+      canReturnToTranslation: next ? false : this.state.canReturnToTranslation,
+    });
+    if (next) {
+      this.translationReturn = null;
+    }
+    this.applyBodyStyles();
   }
 
   async restartService(): Promise<void> {
@@ -642,24 +687,114 @@ export class ReaderController {
   /**
    * Scroll the PDF to a page and record it as the reading position.
    *
-   * The jump result is reported: it used to be discarded, so a reader that
-   * silently refused to scroll still looked successful — the sidebar showed the
-   * new page while the PDF stayed put, which reads as "按钮没反应".
+   * Two rules, both learned from the old version:
+   *   - Only a *verified* jump is recorded. Updating `page` and saving it while
+   *     the reader silently refused the scroll put the stored reading position
+   *     somewhere the PDF never went, so reopening the paper landed on a page the
+   *     user never saw.
+   *   - The bilingual layer is hidden first. It covers the whole reader area, so
+   *     without this the user "jumped" to a page that was still behind the
+   *     translation — the complaint read as "跳转没反应".
    */
   jumpTo(page: number): void {
     void this.jumpToAndReport(page);
   }
 
-  private async jumpToAndReport(page: number): Promise<void> {
-    const moved = await jumpToPage(this.reader, page);
+  /**
+   * Show the original PDF at `page`, optionally inside `region`, and remember
+   * where the translation was so the user can come back to it.
+   */
+  async jumpToPageInPdf(
+    page: number,
+    region?: [number, number, number, number] | null,
+  ): Promise<void> {
+    const hadLayer = this.state.bilingualOpen;
+    if (hadLayer) {
+      // Remember the return position before hiding the layer; the PDF may land on
+      // a different page than the translation was showing.
+      this.translationReturn = {
+        page: this.state.page,
+        segmentId: this.state.highlight,
+        scrollTop: this.readingScrollTop(),
+      };
+      this.set({ bilingualOpen: false, canReturnToTranslation: true });
+      this.applyBodyStyles();
+    }
+    await this.jumpToAndReport(page, region);
+  }
+
+  /** Bring the translation layer back to the position it was left at. */
+  returnToTranslation(): void {
+    const spot = this.translationReturn;
+    this.translationReturn = null;
+    this.set({
+      bilingualOpen: true,
+      canReturnToTranslation: false,
+      ...(spot ? { page: spot.page } : {}),
+    });
+    this.applyBodyStyles();
+    if (!spot) {
+      return;
+    }
+    if (spot.segmentId) {
+      this.flashSegment(spot.segmentId);
+    }
+    this.restoreReadingScroll(spot.scrollTop);
+  }
+
+  /** Scroll offset of the reading column, so 返回译文 resumes where it left off. */
+  private readingScrollTop(): number {
+    try {
+      const doc = readerDocument(this.reader);
+      const column = doc?.querySelector?.(".pl-md__body, .pl-bilingual__cols");
+      return Number((column as HTMLElement | null)?.scrollTop) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private restoreReadingScroll(top: number): void {
+    if (!top) {
+      return;
+    }
+    // The layer has to exist before it can be scrolled.
+    setTimeout(() => {
+      try {
+        const doc = readerDocument(this.reader);
+        const column = doc?.querySelector?.(".pl-md__body, .pl-bilingual__cols");
+        if (column) {
+          (column as HTMLElement).scrollTop = top;
+        }
+      } catch {
+        // A missing layer is not worth reporting; the page is still correct.
+      }
+    }, 60);
+  }
+
+  private async jumpToAndReport(
+    page: number,
+    region?: [number, number, number, number] | null,
+  ): Promise<void> {
+    const result = await jumpToPage(this.reader, page, region);
     if (this.destroyed) {
+      return;
+    }
+    if (!result.ok) {
+      // Do not save the target: the reader is somewhere else.
+      this.notice(
+        result.reason
+          ? `未能定位到第 ${page} 页：${result.reason}`
+          : `无法自动定位到第 ${page} 页，请在 PDF 中手动翻页`,
+      );
+      debug("jumpToPage failed", page, result.via);
       return;
     }
     this.set({ page });
     this.scheduleSaveReading({ page });
-    if (!moved) {
-      this.notice(`无法自动定位到第 ${page} 页，请在 PDF 中手动翻页`);
-      debug("jumpToPage failed", page);
+    if (result.level === "page" && region) {
+      // Coordinates were known but only the page could be reached; say so rather
+      // than implying the region is highlighted.
+      this.notice(`已定位到第 ${page} 页（未能精确到该区域）`);
     }
   }
 
@@ -672,8 +807,19 @@ export class ReaderController {
     if (this.state.mode === "original") {
       this.setMode("dual");
     }
-    void this.jumpToAndReport(segment.page);
+    // A paragraph has coordinates, so the jump aims at the paragraph rather than
+    // just the page — "对应区域" is the whole point of clicking it.
+    void this.jumpToAndReport(segment.page, segmentBBox(segment));
     this.flashSegment(segment.id);
+  }
+
+  /** Scroll the PDF to a paragraph's own rectangle when its box is usable. */
+  jumpToSegmentInPdf(segmentId: string): void {
+    const segment = this.state.segments.find((item) => item.id === segmentId);
+    if (!segment) {
+      return;
+    }
+    void this.jumpToPageInPdf(segment.page, segmentBBox(segment));
   }
 
   /** Briefly highlight a segment in the bilingual view. */

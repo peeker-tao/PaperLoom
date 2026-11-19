@@ -6,7 +6,42 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
+### Fixed — 在 PDF 中查看
+
+- **点了跳转，译文层还盖在原 PDF 上面.** The reading layer covers the whole
+  reader area, so "jumping to the PDF" left the user looking at the translation
+  with the PDF hidden behind it — read as "跳转没反应". The layer is now hidden
+  first, and a **← 返回译文** pill appears so the reading position is not lost.
+  `返回 PDF` in the bilingual bar does the same and remembers where to come back
+  to (page, paragraph and scroll offset).
+- **失败也当成成功，还存了页码.** `jumpToAndReport` updated and saved `page`
+  regardless of whether the reader had scrolled, so the stored reading position
+  drifted to a page the user never saw. A jump is now recorded only after it is
+  verified, and a failure reports the reason
+  (`未能定位到第 N 页：阅读器没有响应跳转请求（当前停在第 M 页）`).
+- **成功与否靠函数返回值判断.** `jumpToPage` now returns a structured
+  `{ok, level, page, via, reason}` and confirms against the viewer's own state
+  (`currentPageNumber`, `reader.state.pageIndex`) with a short poll, instead of
+  trusting that a call returning means a scroll happened.
+- **只有页码时假装定位到了区域.** Paragraphs and figures have coordinates, so the
+  jump aims at their box (`convertToViewportRectangle` → scroll a quarter down the
+  viewport). When only the page can be reached it says so
+  (`已定位到第 N 页（未能精确到该区域）`) instead of implying a highlight.
+- 段落定位不再重复跳两次（原实现在 `jumpToSegment` 里既调 `jumpTo` 又调
+  `jumpToPage`）。
+
+### Changed — 界面
+
+- 阅读视图排版：正文行高 1.66、页标记改为吸顶细分隔线、图表卡片加阴影与
+  悬停反馈、图片加载改为柔光 shimmer 而不是像报错的文字。
+- 侧边栏：统一设计令牌（暖中性色 + 深绿强调色、三级阴影、等宽字体令牌）、
+  键盘可见的 `:focus-visible` 焦点环、细滚动条、按钮 hover/active/disabled
+  状态补齐（禁用时不再是"灰一下"，主按钮保持可辨识）。
+- 底部状态栏新增**服务健康圆点**（绿/黄/红 + 悬停说明），一眼看出"为什么按钮
+  没反应"。
+- 对话气泡改为带阴影的圆角卡片，角色标签更轻。
+
+### Fixed — 模型选择
 
 - **切换问答模型没有任何效果.** The picker called `setModel`, which only updated
   local UI state; `ask()` never put `model` in the request body, so every

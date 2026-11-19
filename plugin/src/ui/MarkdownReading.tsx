@@ -61,7 +61,8 @@ export function MarkdownReading(props: {
           <button
             type="button"
             className="pl-btn pl-btn--ghost pl-small"
-            onClick={() => controller.jumpTo(segment.page)}
+            title="隐藏译文，在 PDF 中定位到这一页"
+            onClick={() => void controller.jumpToPageInPdf(segment.page)}
           >
             在 PDF 中查看
           </button>
@@ -76,7 +77,7 @@ export function MarkdownReading(props: {
         mode={mode}
         active={active === segment.id}
         onPick={() => setActive(active === segment.id ? null : segment.id)}
-        onJump={() => controller.jumpToSegment(segment.id)}
+        onJump={() => controller.jumpToSegmentInPdf(segment.id)}
       />,
     );
   }

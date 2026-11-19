@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSyncExternalStore } from "react";
-import type { ReaderController } from "../reader/controller";
+import type { ReaderController, UIState } from "../reader/controller";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { BilingualView } from "./BilingualView";
 import { ChatPanel } from "./ChatPanel";
@@ -8,6 +8,27 @@ import { GlossaryPanel } from "./GlossaryPanel";
 import { NotesPanel } from "./NotesPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { IconButton, Modal } from "./common";
+
+function serviceState(state: UIState): "ok" | "warn" | "down" {
+  if (state.error) {
+    return "down";
+  }
+  if (!state.service) {
+    return "warn";
+  }
+  return state.service.apiKey?.configured ? "ok" : "warn";
+}
+
+function serviceTitle(state: UIState): string {
+  if (state.error) {
+    return `服务异常：${state.error}`;
+  }
+  if (!state.service) {
+    return "正在连接本地服务…";
+  }
+  const key = state.service.apiKey?.configured ? "API Key 已配置" : "API Key 未配置";
+  return `服务 ${state.service.version} · ${key}`;
+}
 
 export function App({ controller }: { controller: ReaderController }): JSX.Element {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
@@ -41,6 +62,17 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
       ) : null}
 
       <BilingualView controller={controller} state={state} />
+
+      {state.canReturnToTranslation && !state.bilingualOpen ? (
+        <button
+          type="button"
+          className="pl-return-pill"
+          title={`回到译文（第 ${state.page} 页附近）`}
+          onClick={() => controller.returnToTranslation()}
+        >
+          ← 返回译文
+        </button>
+      ) : null}
 
       <aside className={`pl-sidebar${state.sidebarOpen ? "" : " closed"}`} aria-label="PaperLoom">
         <div
@@ -140,6 +172,7 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
         </div>
 
         <div className="pl-footer">
+          <span className="pl-dot" data-state={serviceState(state)} title={serviceTitle(state)} />
           <span title="阅读位置自动保存">p.{state.page}</span>
           <span className="pl-progress" title={`已翻译 ${translated}/${state.segments.length} 段`}>
             <div style={{ width: `${percent}%` }} />

@@ -173,7 +173,12 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
             </IconButton>
           </>
         ) : null}
-        <button type="button" className="pl-btn pl-btn--ghost" onClick={() => controller.toggleBilingual(false)}>
+        <button
+          type="button"
+          className="pl-btn pl-btn--ghost"
+          title={`回到原 PDF 第 ${state.page} 页（保留译文阅读位置）`}
+          onClick={() => void controller.jumpToPageInPdf(state.page)}
+        >
           返回 PDF
         </button>
       </div>

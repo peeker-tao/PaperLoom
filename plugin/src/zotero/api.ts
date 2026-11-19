@@ -87,50 +87,114 @@ export async function resolvePdfPath(item: any): Promise<string | null> {
 }
 
 /**
- * Scroll the reader to a page. Returns whether the scroll actually happened.
- *
- * Order matters, and it was wrong before: `reader.navigate()` only posts a
- * message to the reader iframe, so calling it never throws — the old code
- * returned `true` on the first attempt and the pdf.js path below it was
- * unreachable. "在 PDF 中查看" therefore did nothing while the sidebar happily
- * reported the new page.
+ * Where a jump landed. "page" means the reader accepted the page but not the
+ * region (the usual case: the page was not laid out yet); "region" means the
+ * target box was actually brought into view.
  */
-export async function jumpToPage(reader: any, page: number): Promise<boolean> {
-  const index = Math.max(0, Math.floor(page) - 1);
-  const target = index + 1;
+export type JumpLevel = "region" | "page" | "none";
 
-  // 1. pdf.js inside the reader iframe: same object the page renderer uses, and
-  //    setting `currentPageNumber` scrolls synchronously.
-  const app = reader?._iframeWindow?.PDFViewerApplication;
-  const viewer = app?.pdfViewer;
-  if (viewer) {
+export interface JumpResult {
+  ok: boolean;
+  level: JumpLevel;
+  page: number;
+  /** Which strategy worked, for the log. */
+  via: string;
+  /** Why it failed, in a form that can be shown to the user. */
+  reason?: string;
+}
+
+/** Wait for a predicate, polling, up to a deadline. */
+async function waitFor(
+  check: () => boolean,
+  timeoutMs: number,
+  stepMs = 40,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try {
-      viewer.currentPageNumber = target;
-      if (viewer.currentPageNumber === target) {
+      if (check()) {
         return true;
       }
     } catch {
-      // Fall through: the viewer exists but the page is not laid out yet.
+      // A viewer mid-navigation can throw; keep polling.
     }
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
+  }
+  try {
+    return check();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Scroll the reader to a page, and to a region of it when coordinates are known.
+ *
+ * Two things here are deliberate:
+ *
+ * 1. **Order.** `reader.navigate()` only posts a message to the reader iframe, so
+ *    it never throws. The old code called it first and returned `true`
+ *    unconditionally, which made the reliable pdf.js path underneath dead code:
+ *    "在 PDF 中查看" did nothing while the sidebar reported the new page. pdf.js
+ *    first, then `scrollIntoView`, then the documented API.
+ * 2. **Verification.** A call that returns is not a scroll that happened. The
+ *    result is confirmed against the viewer's own state, so a refused jump is
+ *    reported as a failure instead of being recorded as the reading position.
+ */
+export async function jumpToPage(
+  reader: any,
+  page: number,
+  region?: [number, number, number, number] | null,
+): Promise<JumpResult> {
+  const index = Math.max(0, Math.floor(page) - 1);
+  const target = index + 1;
+  const app = reader?._iframeWindow?.PDFViewerApplication;
+  const viewer = app?.pdfViewer;
+
+  const after = (level: JumpLevel, via: string): JumpResult => ({
+    ok: true,
+    level,
+    page: target,
+    via,
+  });
+
+  // 1. pdf.js. Setting `currentPageNumber` scrolls synchronously, and it is the
+  //    same viewer the page renderer already uses successfully.
+  if (viewer) {
+    try {
+      viewer.currentPageNumber = target;
+      if (await waitFor(() => viewer.currentPageNumber === target, 600)) {
+        if (region && (await scrollToRegion(viewer, index, region))) {
+          return after("region", "pdfjs+region");
+        }
+        return after("page", "pdfjs");
+      }
+    } catch {
+      // Fall through: the viewer exists but is not ready.
+    }
+    // The page may simply not be laid out yet. Scrolling its container works
+    // even when `currentPageNumber` is ignored.
     try {
       const pageView = viewer.getPageView?.(index);
-      const target_ = pageView?.div || pageView?.canvas;
-      if (target_ && typeof target_.scrollIntoView === "function") {
-        target_.scrollIntoView({ block: "start" });
-        return true;
+      const node = pageView?.div || pageView?.canvas;
+      if (node && typeof node.scrollIntoView === "function") {
+        node.scrollIntoView({ block: "start" });
+        if (await waitFor(() => Boolean(node.isConnected), 300)) {
+          return after("page", "pdfjs+scrollIntoView");
+        }
       }
     } catch {
       // Fall through to the documented API.
     }
   }
 
-  // 2. The documented reader API. It returns before the scroll happens, so wait
-  //    for the promise rather than trusting the call itself.
-  const attempts: (() => unknown)[] = [
-    () => reader?.navigate?.({ pageIndex: index }),
-    () => reader?._internalReader?.navigate?.({ pageIndex: index }),
+  // 2. The documented reader API. It returns before the scroll happens, so the
+  //    promise is awaited and then the position is read back.
+  const attempts: [string, () => unknown][] = [
+    ["reader.navigate", () => reader?.navigate?.({ pageIndex: index })],
+    ["internalReader.navigate", () => reader?._internalReader?.navigate?.({ pageIndex: index })],
   ];
-  for (const attempt of attempts) {
+  for (const [via, attempt] of attempts) {
     try {
       const result = attempt();
       if (!result) {
@@ -139,12 +203,73 @@ export async function jumpToPage(reader: any, page: number): Promise<boolean> {
       if (typeof (result as Promise<unknown>).then === "function") {
         await (result as Promise<unknown>);
       }
-      return true;
+      // Confirm against whatever state is readable; a reader without readable
+      // state still gets the benefit of the doubt *only* if the call resolved.
+      const landed = await waitFor(() => currentPage(reader) === target, 800);
+      if (landed || currentPage(reader) === target) {
+        return after("page", via);
+      }
     } catch {
       // Try the next strategy.
     }
   }
-  return false;
+
+  const observed = currentPage(reader);
+  return {
+    ok: false,
+    level: "none",
+    page: target,
+    via: "none",
+    reason:
+      observed === target
+        ? ""
+        : `阅读器没有响应跳转请求（当前停在第 ${observed} 页）`,
+  };
+}
+
+/**
+ * Bring a PDF-space box into view inside the rendered page.
+ *
+ * pdf.js draws each page into a div whose size follows the current scale, so the
+ * box has to be converted from PDF user space (origin bottom-left) to CSS pixels
+ * first. When the page view or its viewport is unavailable the page-level jump
+ * already done is still useful, so this returns false rather than throwing.
+ */
+async function scrollToRegion(
+  viewer: any,
+  index: number,
+  region: [number, number, number, number],
+): Promise<boolean> {
+  try {
+    const pageView = viewer.getPageView?.(index);
+    const container = pageView?.div;
+    if (!container) {
+      return false;
+    }
+    const viewport = pageView.viewport;
+    if (!viewport || typeof viewport.convertToViewportRectangle !== "function") {
+      return false;
+    }
+    const [x0, y0, x1, y1] = region;
+    const rect = viewport.convertToViewportRectangle([x0, y0, x1, y1]);
+    // The box is converted to viewport space; only `top` is needed because the
+    // reader scrolls vertically.
+    const top = Math.min(rect[1], rect[3]);
+    const scroller = container.parentElement;
+    if (!scroller) {
+      return false;
+    }
+    // Put the region about a quarter down the viewport so surrounding context is
+    // visible, which is what makes a jump feel like "找到这里" rather than
+    // "这一行贴着屏幕顶端".
+    const target = Math.max(0, top - scroller.clientHeight * 0.25);
+    scroller.scrollTop = target;
+    // A scroll that did not move means the region is already visible, which is
+    // just as good as having scrolled to it.
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function currentPage(reader: any): number {

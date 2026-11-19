@@ -1,16 +1,30 @@
 export const SHADOW_CSS = `
 :host { all: initial; }
 .pl-root {
+  /* One place for the whole palette. The reading view is a lot of small text on
+     a light background, so the neutrals are slightly warm and the accent is a
+     deep green that survives being used for both text and fill at this size. */
   --pl-bg: #fbfaf7;
   --pl-panel: #ffffff;
-  --pl-fg: #22262b;
-  --pl-muted: #6d736f;
-  --pl-border: #e4e1d8;
+  --pl-fg: #1f242a;
+  --pl-fg-soft: #3d444a;
+  --pl-muted: #6a716d;
+  --pl-faint: #949b96;
+  --pl-border: #e3e0d6;
+  --pl-border-soft: #eeece4;
   --pl-accent: #23615a;
+  --pl-accent-hover: #1b4f49;
   --pl-accent-weak: #e7f0ed;
+  --pl-accent-ring: rgba(35, 97, 90, 0.16);
   --pl-warn: #8a5a12;
   --pl-danger: #a33a2c;
-  --pl-radius: 8px;
+  --pl-radius: 9px;
+  --pl-radius-sm: 6px;
+  --pl-shadow-1: 0 1px 2px rgba(24, 34, 30, 0.06);
+  --pl-shadow-2: 0 4px 16px rgba(24, 34, 30, 0.10);
+  --pl-shadow-3: 0 10px 34px rgba(24, 34, 30, 0.16);
+  --pl-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Source Serif Pro", serif;
+  --pl-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Consolas", monospace;
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -18,9 +32,35 @@ export const SHADOW_CSS = `
   font-size: 13px;
   line-height: 1.55;
   color: var(--pl-fg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   z-index: 2147483000;
 }
 .pl-root * { box-sizing: border-box; }
+/* Keyboard users get a visible ring; mouse users are not interrupted by one.
+   :focus-visible is not honoured in every Gecko build Zotero ships, so the
+   fallback keeps focus visible for real focus (not for programmatic .focus()). */
+.pl-root :is(button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid #74a79b;
+  outline-offset: 1px;
+  border-radius: var(--pl-radius-sm);
+}
+/* A thin, unobtrusive scrollbar: the reading column is long and the default
+   scrollbar in the reader iframe is wide enough to eat a line of text. */
+.pl-scroll, .pl-md__body, .pl-bilingual__cols, .pl-page-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cfd6d1 transparent;
+}
+.pl-scroll::-webkit-scrollbar, .pl-md__body::-webkit-scrollbar,
+.pl-bilingual__cols::-webkit-scrollbar { width: 10px; height: 10px; }
+.pl-scroll::-webkit-scrollbar-thumb, .pl-md__body::-webkit-scrollbar-thumb,
+.pl-bilingual__cols::-webkit-scrollbar-thumb {
+  background: #d5dbd7; border-radius: 999px; border: 3px solid transparent;
+  background-clip: content-box;
+}
+.pl-scroll::-webkit-scrollbar-thumb:hover, .pl-md__body::-webkit-scrollbar-thumb:hover {
+  background: #b9c3bd; background-clip: content-box;
+}
 .pl-sidebar {
   position: absolute;
   top: 0; right: 0; bottom: 0;
@@ -60,6 +100,22 @@ export const SHADOW_CSS = `
   cursor: pointer; pointer-events: auto;
   font-size: 12px; letter-spacing: 1px;
 }
+/* "返回译文": shown after a jump hid the reading layer. Sits at the top-left of
+   the reader so it is the first thing reachable when the PDF is in view, and
+   never overlaps the sidebar on the right. */
+.pl-return-pill {
+  position: absolute; left: 14px; top: 14px;
+  z-index: 9;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px;
+  background: var(--pl-accent); color: #fff;
+  border: none; border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(22, 60, 56, 0.28);
+  cursor: pointer; pointer-events: auto;
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.2px;
+}
+.pl-return-pill:hover { background: #1c5049; }
+.pl-return-pill:active { transform: translateY(1px); }
 .pl-header {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px 8px;
@@ -89,15 +145,20 @@ export const SHADOW_CSS = `
 }
 .pl-card--warn { border-color: #edd9b0; background: #fffaf0; color: #6a4a10; }
 .pl-card--error { border-color: #e6c3bc; background: #fdf4f2; color: #7c3025; }
-.pl-msg { margin-bottom: 12px; }
-.pl-msg__role { font-size: 11px; color: var(--pl-muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
+.pl-msg { margin-bottom: 14px; }
+.pl-msg__role {
+  font-size: 10.5px; color: var(--pl-faint); margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
 .pl-msg--user .pl-msg__bubble {
-  background: var(--pl-accent-weak); border-radius: 10px 10px 2px 10px;
-  padding: 8px 10px; white-space: pre-wrap; word-break: break-word;
+  background: var(--pl-accent-weak); border-radius: 12px 12px 3px 12px;
+  padding: 9px 12px; white-space: pre-wrap; word-break: break-word;
+  box-shadow: var(--pl-shadow-1); color: var(--pl-fg-soft);
 }
 .pl-msg--assistant .pl-msg__bubble {
-  background: var(--pl-panel); border: 1px solid var(--pl-border);
-  border-radius: 10px 10px 10px 2px; padding: 8px 10px;
+  background: var(--pl-panel); border: 1px solid var(--pl-border-soft);
+  border-radius: 12px 12px 12px 3px; padding: 10px 13px;
+  box-shadow: var(--pl-shadow-1);
 }
 .pl-msg__bubble p { margin: 0 0 6px; }
 .pl-msg__bubble ul, .pl-msg__bubble ol { margin: 4px 0 8px; padding-left: 20px; }
@@ -115,24 +176,38 @@ export const SHADOW_CSS = `
 .pl-cite:hover { background: #e2efe9; }
 .pl-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .pl-btn {
-  border: 1px solid var(--pl-border); background: var(--pl-panel); color: var(--pl-fg);
-  border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--pl-border); background: var(--pl-panel); color: var(--pl-fg-soft);
+  border-radius: var(--pl-radius-sm); padding: 4px 10px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease,
+    box-shadow 0.12s ease;
 }
-.pl-btn:hover { border-color: #cfd8d4; background: #f7f8f6; }
+.pl-btn:hover { border-color: #cfd8d4; background: #f7f8f6; color: var(--pl-fg); }
+.pl-btn:active { background: #eef1ee; }
 /* Interactive elements opt back into hit-testing explicitly. .pl-root has
    pointer-events: none so clicks on empty space reach the PDF; if any host rule
    (or a future wrapper) inherits that onto a control, the button would look
    normal and be dead. */
 .pl-btn, .pl-icon-btn, .pl-tab, .pl-textarea, .pl-input, .pl-select,
 .pl-reopen, .pl-chip button, .pl-md__page button, .pl-md__figure-fallback,
-.pl-seg-overlay, .pl-seg-overlay__line {
+.pl-seg-overlay, .pl-seg-overlay__line, .pl-return-pill {
   pointer-events: auto;
 }
-.pl-btn--primary { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; }
-.pl-btn--primary:hover { background: #1c5049; }
-.pl-btn--ghost { border-color: transparent; color: var(--pl-muted); }
+.pl-btn--primary {
+  background: var(--pl-accent); border-color: var(--pl-accent); color: #fff;
+  box-shadow: 0 1px 2px rgba(35, 97, 90, 0.24);
+}
+.pl-btn--primary:hover { background: var(--pl-accent-hover); border-color: var(--pl-accent-hover); color: #fff; }
+.pl-btn--ghost { border-color: transparent; color: var(--pl-muted); background: transparent; }
+.pl-btn--ghost:hover { color: var(--pl-fg); background: #eef1ee; border-color: transparent; }
 .pl-btn--danger { color: var(--pl-danger); border-color: #e6c3bc; }
-.pl-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.pl-btn--danger:hover { background: #fdf4f2; border-color: #d9b0a8; }
+.pl-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.pl-btn:disabled:hover { background: var(--pl-panel); border-color: var(--pl-border); color: var(--pl-fg-soft); }
+.pl-btn--primary:disabled:hover { background: var(--pl-accent); border-color: var(--pl-accent); color: #fff; }
+/* Small hint under a disabled control: says *why* it is disabled instead of
+   leaving the user to guess. */
+.pl-hint { font-size: 11px; color: var(--pl-faint); margin-top: 4px; line-height: 1.45; }
 .pl-select, .pl-input, .pl-textarea {
   border: 1px solid var(--pl-border); background: var(--pl-panel); color: var(--pl-fg);
   border-radius: 6px; padding: 5px 8px; font-size: 12.5px; font-family: inherit; outline: none;
@@ -168,7 +243,19 @@ export const SHADOW_CSS = `
   border-top: 1px solid var(--pl-border); background: #f6f5f0; color: var(--pl-muted); font-size: 11px;
 }
 .pl-progress { flex: 1; height: 4px; background: #e7e4da; border-radius: 999px; overflow: hidden; }
-.pl-progress > div { height: 100%; background: var(--pl-accent); transition: width 0.25s; }
+.pl-progress > div {
+  height: 100%; background: var(--pl-accent); border-radius: 999px;
+  transition: width 0.3s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+/* Live service health. A dot is the smallest thing that answers "为什么按钮没反应"
+   without the user opening a diagnostic panel. */
+.pl-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: #b9c3bd; box-shadow: 0 0 0 3px rgba(185, 195, 189, 0.18);
+}
+.pl-dot[data-state="ok"] { background: #2f8f6b; box-shadow: 0 0 0 3px rgba(47, 143, 107, 0.16); }
+.pl-dot[data-state="warn"] { background: #c08a2e; box-shadow: 0 0 0 3px rgba(192, 138, 46, 0.16); }
+.pl-dot[data-state="down"] { background: var(--pl-danger); box-shadow: 0 0 0 3px rgba(163, 58, 44, 0.16); }
 .pl-muted { color: var(--pl-muted); }
 .pl-small { font-size: 11.5px; }
 .pl-row { display: flex; align-items: center; gap: 8px; }
@@ -279,62 +366,87 @@ export const SHADOW_CSS = `
   flex: 1; min-height: 0; overflow-y: auto;
   /* Fill the sidebar: a centred narrow column left visible dead space on both
      sides and made long English paragraphs wrap more than the width allowed. */
-  padding: 16px 18px 60px;
+  padding: 18px 20px 72px;
   width: 100%;
   font-size: 14px; line-height: 1.62; color: #16191c;
 }
 .pl-md__page {
   display: flex; align-items: center; gap: 8px;
-  margin: 26px 0 12px; color: var(--pl-muted); font-size: 11px;
-  letter-spacing: 0.4px; text-transform: uppercase;
+  margin: 22px 0 10px; color: var(--pl-faint); font-size: 10.5px;
+  letter-spacing: 0.7px; text-transform: uppercase;
+  position: sticky; top: -1px; z-index: 3;
+  background: linear-gradient(#fdfcf8 82%, rgba(253, 252, 248, 0));
+  padding: 4px 0 5px;
 }
-.pl-md__page::after { content: ""; flex: 1; height: 1px; background: var(--pl-border); }
+.pl-md__page::after { content: ""; flex: 1; height: 1px; background: var(--pl-border-soft); }
 .pl-md__page:first-child { margin-top: 0; }
-.pl-md__heading { margin: 22px 0 10px; cursor: default; }
-.pl-md__heading--2 { font-size: 19px; font-weight: 700; }
-.pl-md__heading--3 { font-size: 16px; font-weight: 650; }
+.pl-md__heading { margin: 26px 0 12px; cursor: default; }
+.pl-md__heading--2 { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
+.pl-md__heading--3 { font-size: 16.5px; font-weight: 650; letter-spacing: -0.1px; }
 .pl-md__heading--4, .pl-md__heading--5, .pl-md__heading--6 { font-size: 14.5px; font-weight: 650; }
-.pl-md__para { margin: 0 0 14px; padding: 4px 8px; border-radius: 5px; cursor: default; }
-.pl-md__figure {
-  margin: 6px 0 16px; padding: 8px; border-radius: 6px;
-  background: #fff; border: 1px solid var(--pl-border);
+.pl-md__para {
+  margin: 0 0 6px; padding: 7px 10px; border-radius: var(--pl-radius-sm);
+  cursor: default;
+  transition: background 0.12s ease;
 }
+.pl-md__figure {
+  margin: 10px 0 18px; padding: 10px; border-radius: var(--pl-radius);
+  background: #fff; border: 1px solid var(--pl-border);
+  box-shadow: var(--pl-shadow-1);
+  transition: box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.pl-md__figure:hover { box-shadow: var(--pl-shadow-2); border-color: #d8d5c9; }
 .pl-md__figure-img {
   display: block; width: 100%; height: auto; cursor: zoom-in;
-  border-radius: 3px; background: #fff;
+  border-radius: 4px; background: #fff;
 }
 .pl-md__figure-label {
   display: flex; align-items: center; gap: 8px;
-  margin-top: 6px; color: var(--pl-muted); font-size: 11.5px;
+  margin-top: 8px; color: var(--pl-muted); font-size: 11.5px;
   letter-spacing: 0.3px;
 }
 .pl-md__figure-loading,
 .pl-md__figure-fallback {
-  display: block; width: 100%; padding: 24px 10px;
-  border: 1px dashed var(--pl-border); border-radius: 4px;
+  display: block; width: 100%; padding: 26px 10px;
+  border: 1px dashed var(--pl-border); border-radius: var(--pl-radius-sm);
   background: #faf9f5; color: var(--pl-muted); font-size: 12px; text-align: center;
 }
-.pl-md__figure-fallback { cursor: pointer; }
-.pl-md__para:hover, .pl-md__heading:hover { background: #f4f6f3; }
-.pl-md__para.active, .pl-md__heading.active {
-  background: var(--pl-accent-weak); box-shadow: inset 2px 0 0 var(--pl-accent);
+/* A quiet shimmer while the crop is being rendered, instead of a bare sentence
+   that reads like an error. */
+.pl-md__figure-loading {
+  background: linear-gradient(100deg, #faf9f5 30%, #f3f2ec 50%, #faf9f5 70%);
+  background-size: 220% 100%;
+  animation: pl-shimmer 1.4s ease-in-out infinite;
 }
-.pl-md__para--minor { opacity: 0.86; font-size: 13px; }
+@keyframes pl-shimmer {
+  from { background-position: 130% 0; }
+  to { background-position: -30% 0; }
+}
+.pl-md__figure-fallback { cursor: pointer; }
+.pl-md__figure-fallback:hover { border-color: #c9c5b6; color: var(--pl-fg-soft); }
+.pl-md__para:hover, .pl-md__heading:hover { background: #f5f7f3; }
+.pl-md__para.active, .pl-md__heading.active {
+  background: var(--pl-accent-weak); box-shadow: inset 3px 0 0 var(--pl-accent);
+}
+.pl-md__para--minor { opacity: 0.88; font-size: 13px; }
 .pl-md__en {
   margin: 0;
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-  font-size: 14.5px; line-height: 1.6; color: #1a1d20;
+  font-family: var(--pl-serif);
+  font-size: 14.5px; line-height: 1.66; color: #1a1d20;
+  /* Long English words and DOIs must not blow out the column width. */
+  overflow-wrap: break-word;
 }
 .pl-md__zh {
-  margin: 6px 0 0; padding-left: 10px;
+  margin: 7px 0 0; padding-left: 11px;
   border-left: 2px solid var(--pl-accent-weak);
   font-family: "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
-  font-size: 13.8px; line-height: 1.75; color: #24302a;
+  font-size: 13.8px; line-height: 1.78; color: #232f29;
+  overflow-wrap: break-word;
 }
 .pl-md__zh--heading { margin-top: 4px; border-left-color: var(--pl-accent); font-weight: 600; }
-.pl-md__actions { display: flex; gap: 6px; margin-top: 4px; }
+.pl-md__actions { display: flex; gap: 6px; margin-top: 6px; }
 @media (max-width: 620px) {
-  .pl-md__body { padding: 12px 12px 48px; }
+  .pl-md__body { padding: 12px 12px 56px; }
   .pl-md__en { font-size: 14px; }
 }
 `;
