@@ -133,10 +133,20 @@ export async function init(): Promise<void> {
   test.addEventListener("click", async () => {
     message.textContent = "测试中…";
     try {
-      const result = await manager!.client.testSettings(chatModel.value.trim() || undefined);
-      message.textContent = result.ok
-        ? `连接成功：${result.latencyMs} ms（${result.reply}）`
-        : `连接失败：${result.error?.message || "未知错误"}`;
+      // Same rule as the in-sidebar panel: test what is typed right now, and
+      // never save it. A blank key means "use the saved one".
+      const result = await manager!.client.testSettings({
+        model: chatModel.value.trim() || undefined,
+        baseUrl: baseUrl.value.trim() || undefined,
+        apiKey: apiKey.value.trim() || undefined,
+      });
+      if (result.ok) {
+        const used = result.usedTypedKey ? "，使用刚输入的 Key（未保存）" : "，使用已保存的 Key";
+        message.textContent = `连接成功：${result.model || chatModel.value}，${result.latencyMs} ms（${result.reply}）${used}`;
+      } else {
+        const code = result.error?.code ? `（${result.error.code}）` : "";
+        message.textContent = `连接失败${code}：${result.error?.message || "未知错误"}`;
+      }
     } catch (error) {
       message.textContent = `连接失败：${errorText(error)}`;
     }

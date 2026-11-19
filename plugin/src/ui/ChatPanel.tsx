@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { shouldSendOnEnter } from "../composer";
 import { debug } from "../log";
 import type { ReaderController, UIState } from "../reader/controller";
 import type { Usage } from "../types";
@@ -19,6 +20,8 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastSent = useRef<string | null>(null);
+  /** True while an IME composition is open; see onCompositionStart below. */
+  const composing = useRef(false);
   const [draft, setDraft] = useState(state.composerDraft);
   const last = state.messages[state.messages.length - 1];
 
@@ -201,12 +204,40 @@ export function ChatPanel(props: { controller: ReaderController; state: UIState 
             }
           }}
           onFocus={() => controller.ensureKeyboardFocus()}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            // Cleared on a timeout: on some builds the keydown that confirms the
+            // candidate arrives *after* compositionend within the same tick, so
+            // clearing immediately would let that Enter send the message.
+            setTimeout(() => {
+              composing.current = false;
+            }, 0);
+          }}
           onKeyDown={(event) => {
             if (!loggedKeystroke) {
               loggedKeystroke = true;
               debug("composer keystroke", event.key);
             }
-            if (event.key === "Enter" && !event.shiftKey) {
+            const native = event.nativeEvent;
+            const send = shouldSendOnEnter({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              ctrlKey: event.ctrlKey,
+              metaKey: event.metaKey,
+              altKey: event.altKey,
+              isComposing: native?.isComposing,
+              keyCode: native?.keyCode,
+              composing: composing.current,
+            });
+            if (event.key === "Enter" && !send && !event.shiftKey) {
+              // Enter was consumed by the IME: do nothing so the candidate
+              // window keeps control. (Not preventing default is what lets the
+              // IME finish its work.)
+              return;
+            }
+            if (send) {
               event.preventDefault();
               submit();
             }

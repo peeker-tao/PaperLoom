@@ -102,15 +102,42 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
     }
   };
 
+  /**
+   * Test the values that are on screen right now.
+   *
+   * The old version sent only the model, so a freshly typed Base URL or key was
+   * ignored: the user was told their new configuration worked when the saved one
+   * had been tested. Nothing here is saved — `save()` is the only writer.
+   */
   const test = async () => {
     setBusy(true);
     setTestResult(null);
+    const typedKey = apiKey.trim();
     try {
-      const result = await client.testSettings(form.chatModel);
+      const result = await client.testSettings({
+        model: form.chatModel,
+        baseUrl: form.baseUrl,
+        apiKey: typedKey,
+      });
+      const parts: string[] = [];
       if (result.ok) {
-        setTestResult(`连接成功：${result.latencyMs} ms，回复“${result.reply}”`);
+        parts.push(`连接成功 · ${result.model || form.chatModel}`);
+        if (typeof result.latencyMs === "number") {
+          parts.push(`${result.latencyMs} ms`);
+        }
+        if (result.reply) {
+          parts.push(`回复「${result.reply}」`);
+        }
+        if (result.usedTypedKey) {
+          parts.push("已使用刚才输入的 Key（未保存）");
+        } else {
+          parts.push("使用已保存的 Key");
+        }
+        parts.push(`地址 ${result.baseUrl || form.baseUrl}`);
+        setTestResult(parts.join(" · "));
       } else {
-        setTestResult(`连接失败：${result.error?.message || "未知错误"}`);
+        const code = result.error?.code ? `（${result.error.code}）` : "";
+        setTestResult(`连接失败${code}：${result.error?.message || "未知错误"}`);
       }
     } catch (error) {
       setTestResult(controller.friendlyError(error));
@@ -178,6 +205,11 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
               删除
             </button>
           </div>
+          <div className="pl-hint">
+            {payload?.apiKey.configured
+              ? "留空 = 沿用已保存的 Key；填入新 Key 只用于本次「测试连接」，点保存才会写入。"
+              : "尚未保存 Key。填入后先「测试连接」验证，再点保存。"}
+          </div>
         </div>
         <div className="pl-actions">
           <button type="button" className="pl-btn pl-btn--primary" disabled={busy} onClick={() => void save()}>
@@ -186,11 +218,30 @@ export function SettingsPanel(props: { controller: ReaderController; state: UISt
           <button type="button" className="pl-btn" disabled={busy} onClick={() => void test()}>
             测试连接
           </button>
-          {state.service && !state.service.apiKey.configured ? (
-            <span className="pl-small pl-muted">未配置时可先用“演示模式”验证界面</span>
-          ) : null}
+          {testResult ? null : (
+            <span className="pl-small pl-muted">
+              测试使用当前填写的地址、密钥与问答模型，不会保存
+            </span>
+          )}
         </div>
-        {testResult ? <div className="pl-small" style={{ marginTop: 6 }}>{testResult}</div> : null}
+        {testResult ? (
+          <div
+            className="pl-small"
+            style={{
+              marginTop: 6,
+              color: testResult.startsWith("连接成功") ? "#2f6b4f" : "#a33a2c",
+            }}
+          >
+            {testResult}
+          </div>
+        ) : null}
+        {testResult?.startsWith("连接成功") ? (
+          <div className="pl-actions" style={{ marginTop: 6 }}>
+            <button type="button" className="pl-btn pl-btn--primary" disabled={busy} onClick={() => void save()}>
+              保存当前配置
+            </button>
+          </div>
+        ) : null}
         {message ? <div className="pl-small" style={{ marginTop: 6 }}>{message}</div> : null}
       </div>
 

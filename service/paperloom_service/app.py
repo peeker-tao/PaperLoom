@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -94,6 +95,26 @@ def require_supported_model(model: str | None, *, field: str = "model") -> None:
     )
 
 
+def redact_secrets(text: str) -> str:
+    """Remove anything that looks like an API key or an authorization header.
+
+    Error text is shown in the UI and written to the log. An HTTP client can put
+    request headers into an exception message, and this project's whole promise
+    is that the key stays on the machine — so it is scrubbed before it can travel
+    any further.
+    """
+    if not text:
+        return text
+    # Authorization: Bearer <token>  /  x-api-key: <token>
+    text = re.sub(
+        r"(?i)(authorization\s*:\s*bearer\s+)\S+", r"\1***", text
+    )
+    text = re.sub(r"(?i)(x-api-key\s*:\s*)\S+", r"\1***", text)
+    # Bare DeepSeek-style keys.
+    text = re.sub(r"\bsk-[A-Za-z0-9_\-]{8,}", "sk-***", text)
+    return text
+
+
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -126,11 +147,18 @@ class AppState:
         self.jobs: JobManager | None = None
 
     # -- helpers ------------------------------------------------------- #
-    def client(self, settings: Settings | None = None) -> DeepSeekClient:
+    def client(
+        self, settings: Settings | None = None, *, api_key: str | None = None
+    ) -> DeepSeekClient:
+        """Build a client. `api_key` overrides the stored key for one request.
+
+        The override exists so "测试连接" can try a key the user just typed
+        without saving it first; nothing about it is persisted.
+        """
         effective = settings or self.settings
         return DeepSeekClient(
             base_url=effective.base_url,
-            api_key=load_api_key(self.cfg),
+            api_key=api_key or load_api_key(self.cfg),
             timeout=effective.timeout_seconds,
             connect_timeout=effective.connect_timeout_seconds,
             max_retries=effective.max_retries,
@@ -378,13 +406,42 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
 
     @app.post("/v1/settings/test")
     async def test_settings(request: Request):
+        """Test a connection with the values currently typed in the form.
+
+        The point of this endpoint is to answer "does *this* Base URL and key
+        work?" before the user commits to saving them. It used to accept only a
+        model, so a freshly typed URL or key was ignored and the user was told
+        their new configuration worked when the old one had been tested.
+
+        The key is used for this one request only. It is never stored, never
+        echoed back, and never logged.
+        """
         body = {}
         try:
             body = await request.json()
         except (json.JSONDecodeError, UnicodeDecodeError):
             body = {}
-        model = (body or {}).get("model") or state.settings.chat_model
-        raw_base = (body or {}).get("baseUrl")
+        body = body or {}
+        model = body.get("model") or state.settings.chat_model
+        try:
+            require_supported_model(model, field="测试模型")
+        except HTTPException as exc:
+            # This endpoint reports problems in the body so the settings panel can
+            # show them inline; an HTTP error would surface as a bare status.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            return {
+                "ok": False,
+                "error": {
+                    "code": detail.get("code", "unknown_model"),
+                    "message": detail.get("message", "模型不可用"),
+                    "retryable": False,
+                },
+            }
+        raw_base = body.get("baseUrl")
+        # An empty/blank key means "use the saved one", which is what the UI says
+        # next to the field. A blank string must not be sent as a real key.
+        typed_key = str(body.get("apiKey") or "").strip()
+        base_settings = dict(state.settings.public())
         if raw_base:
             check = check_base_url(raw_base)
             if not check.ok:
@@ -396,21 +453,30 @@ def create_app(cfg: RuntimeConfig) -> FastAPI:
                         "retryable": False,
                     },
                 }
-            settings = Settings(
-                **{**state.settings.public(), "base_url": check.normalized}
-            )
-            client = state.client(settings)
-        else:
-            client = state.client()
+            base_settings["base_url"] = check.normalized
+        # Build a throwaway client from the form values. `state.client(settings)`
+        # reuses the stored key, so an explicit key has to be injected separately.
+        settings = Settings(**base_settings)
+        client = state.client(settings)
+        if typed_key:
+            client = state.client(settings, api_key=typed_key)
         try:
             result = await client.test_connection(model)
-            return {"ok": True, "baseUrl": client.endpoint, **result}
+            return {
+                "ok": True,
+                "baseUrl": client.endpoint,
+                "usedTypedKey": bool(typed_key),
+                **result,
+            }
         except DeepSeekError as exc:
             return {"ok": False, "error": exc.as_dict()}
         except Exception as exc:  # noqa: BLE001 - surfaced to the UI as a diagnostic
+            # Never include the key: an exception message can contain the request
+            # headers on some HTTP client versions.
+            message = redact_secrets(str(exc))
             return {
                 "ok": False,
-                "error": {"code": "internal", "message": str(exc), "retryable": False},
+                "error": {"code": "internal", "message": message, "retryable": False},
             }
 
     # ------------------------------------------------------------------ #

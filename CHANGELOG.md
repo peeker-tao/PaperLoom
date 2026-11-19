@@ -41,6 +41,33 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   没反应"。
 - 对话气泡改为带阴影的圆角卡片，角色标签更轻。
 
+### Fixed — 中文输入法误发送
+
+- **用中文输入法按 Enter 选词会直接把半句话发出去.** The composer's `onKeyDown`
+  never checked `isComposing`, so the Enter that confirms an IME candidate was
+  treated as "send". `src/composer.ts` now decides with three signals because no
+  single one is reliable across the Gecko builds Zotero ships: the standard
+  `isComposing`, the deprecated-but-necessary `keyCode === 229`, and our own
+  `compositionstart`/`compositionend` tracking (cleared on a timeout, because the
+  confirming keydown can arrive *after* `compositionend` in the same tick).
+  Shift+Enter still inserts a newline; Ctrl/Cmd/Alt+Enter is left to the browser.
+
+### Fixed — 设置页测试连接
+
+- **刚填的 Base URL 和 API Key 没有参与测试.** `/v1/settings/test` accepted only a
+  model, so a URL or key the user had just typed was ignored: the panel said
+  "连接成功" for the *saved* configuration. The endpoint now takes
+  `{model, baseUrl, apiKey}` and builds a throwaway client, and the panel sends
+  what is on screen. Nothing is saved by testing.
+- **留空 Key 的规则说不清楚.** The field now states it: blank means "use the saved
+  key", a typed key is used **for this test only**, and only 保存 writes it. The
+  result line also says which key was used.
+- **测试成功却不能接着保存.** A successful test now offers 「保存当前配置」.
+- **密钥可能泄漏到错误文本里.** Error messages are scrubbed
+  (`Authorization: Bearer ***`, `x-api-key: ***`, `sk-***`) before they reach the UI
+  or the log, and a typed key is never echoed back.
+- 测试结果现在写明**测试的模型、耗时、使用的地址**，以及失败时的错误码。
+
 ### Fixed — 翻译入口
 
 - **「页码…」在 Zotero 里点了没反应.** It called `window.prompt()`, which is not
@@ -92,9 +119,14 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `plugin/test/pages.test.mjs` (8) — range parsing: `1-3,5`, full-width commas and
   dashes, de-duplication, blank = whole paper, and the error cases that would
   otherwise translate the wrong pages.
+- `plugin/test/composer.test.mjs` (8) — Enter vs. IME confirmation, Shift+Enter,
+  modifier combinations, and that English typing still sends after a composition.
 - `plugin/test/jump.test.mjs` (7) — the jump contract, including
   "a navigate that resolves without moving is not a success".
 - `plugin/test/model.test.mjs` (7) — model selection rule.
+- `service/tests/test_settings_test.py` (10) — the connection test uses the typed
+  URL/key, saves nothing, rejects a bad URL and an unknown model, and never
+  echoes the key (plus the redaction helper).
 
 ## [0.2.2] - 2026-11-18
 

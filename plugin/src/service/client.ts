@@ -226,11 +226,33 @@ export class ServiceClient {
     });
   }
 
-  testSettings(model?: string) {
-    return this.request<{ ok: boolean; error?: any; latencyMs?: number; reply?: string }>(
-      "/v1/settings/test",
-      { method: "POST", body: JSON.stringify({ model }) },
-    );
+  /**
+   * Test a connection with the values currently in the form.
+   *
+   * `apiKey` is sent only for this request: the service uses it and discards it.
+   * Leaving it blank means "use the saved key", which is what the settings panel
+   * says next to the field. `baseUrl` is likewise tested without being saved.
+   */
+  testSettings(input: { model?: string; baseUrl?: string; apiKey?: string }) {
+    const body: Record<string, unknown> = {};
+    if (input.model) {
+      body.model = input.model;
+    }
+    if (input.baseUrl?.trim()) {
+      body.baseUrl = input.baseUrl.trim();
+    }
+    if (input.apiKey?.trim()) {
+      body.apiKey = input.apiKey.trim();
+    }
+    return this.request<{
+      ok: boolean;
+      error?: any;
+      latencyMs?: number;
+      reply?: string;
+      model?: string;
+      baseUrl?: string;
+      usedTypedKey?: boolean;
+    }>("/v1/settings/test", { method: "POST", body: JSON.stringify(body) });
   }
 
   registerDocument(payload: Record<string, unknown>) {
