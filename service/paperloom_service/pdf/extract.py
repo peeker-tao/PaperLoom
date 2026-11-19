@@ -36,7 +36,7 @@ log = logging.getLogger("paperloom.pdf")
 # v8: a sentence interrupted by a display equation, a picture or a run-in label
 #     ("Training." / "Datasets.") is rejoined, and `(cid:N)` glyph runs are typed
 #     as formulas instead of being printed as one-line paragraphs.
-PARSER_VERSION = 8
+PARSER_VERSION = 9
 
 MIN_CHARS_PER_PAGE = 60
 # Lines shorter than this carry no prose and only break paragraph merging.
@@ -561,6 +561,27 @@ def _classify(seg: dict, page: int, pages: int, body_size: float) -> str:
         return "formula"
     if page == 1 and re.match(r"^abstract\b", text, re.IGNORECASE):
         return "abstract"
+    # A caption-sized or smaller run is not body prose. Papers set sub-figure
+    # annotations and table notes at 7-8pt while the body is 10pt, and those
+    # lines read as stray one-sentence paragraphs between real ones
+    # ("Making two cameras as close as possible, thus considering they share a
+    # common camera pose."). This sits after the reference and formula checks so
+    # a smaller bibliography or equation is still typed correctly.
+    if (
+        size <= body_size - 1.5
+        and len(text) < 300
+        and re.search(r"[A-Za-z]{3,}", text)
+        # Not a table cell: cells are set small too, and taking them for captions
+        # both hid the table detection below (which only looks at `body`) and
+        # printed every cell as a caption in the reading view. Measured: one
+        # paper went from 102 table cells to 0 and from 9 captions to 119.
+        and not _looks_like_table_cell(text)
+        # Not a bibliography entry: those are smaller than the body in most
+        # papers, and a year or a page range is the giveaway.
+        and not re.search(r"\b(19|20)\d{2}\b", text)
+        and not re.search(r"\d+\s*[-\u2013]\s*\d+", text)
+    ):
+        return "caption"
     return "body"
 
 
@@ -700,10 +721,17 @@ def _mark_layout_fragments(segments: list[dict]) -> None:
             if seg["kind"] == "body" and _looks_like_table_cell(seg["text"])
         ]
         # A table has several such cells; a lone short label is usually a
-        # sentence, so require company before flagging them.
+        # sentence, so require company before flagging them. The exception is a
+        # metric header: an arrow (↑↓ or ▲▼) never appears in prose, so a lone
+        # "SSIM ↑ LPIPS ↓" is a table header even when it is the only one on the
+        # page — it used to be printed as a paragraph with a down-arrow in it.
         if len(cell_candidates) >= 3:
             for seg in cell_candidates:
                 seg["kind"] = "table"
+        else:
+            for seg in cell_candidates:
+                if re.search(r"[\u2191\u2193\u25b2\u25bc]", seg["text"]):
+                    seg["kind"] = "table"
 
 
 def _mark_affiliations_as_meta(segments: list[dict]) -> None:

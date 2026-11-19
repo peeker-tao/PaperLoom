@@ -23,7 +23,14 @@ export function JobBanner(props: {
     return null;
   }
 
-  const canRetry = job.state === "failed" || job.state === "interrupted";
+  // A cancelled job is a dead end otherwise: the banner says so and offers
+  // nothing, which is where the user in the report ended up (已取消 · 0/9 段 and
+  // no way forward). Continuing is the obvious next action, and it is free for
+  // the segments that already finished.
+  const canRetry =
+    job.state === "failed" ||
+    job.state === "interrupted" ||
+    (job.state === "cancelled" && isUnfinished(job));
   const layoutFailed = job.layout?.state === "failed";
   const showRead = job.state === "succeeded";
 
@@ -46,9 +53,10 @@ export function JobBanner(props: {
         <button
           type="button"
           className="pl-btn pl-btn--ghost pl-small"
+          title="重新开始同一批页面的翻译（已译好的段落会跳过）"
           onClick={() => void controller.retryTranslation()}
         >
-          重试
+          {job.state === "cancelled" ? "继续翻译" : "重试"}
         </button>
       ) : null}
       {state.translating ? (
@@ -115,8 +123,23 @@ function describe(job: Job): Description | null {
     case "interrupted":
       return { label: "翻译中断", detail: "服务可能已重启，可重试", tone: "warn" };
     case "cancelled":
-      return { label: "已取消", detail: counter ? `已完成 ${counter}` : "", tone: "warn" };
+      return {
+        label: "已取消",
+        detail: isUnfinished(job)
+          ? counter
+            ? `已完成 ${counter}，可以继续`
+            : "还没有开始翻译"
+          : counter,
+        tone: "warn",
+      };
     default:
       return null;
   }
+}
+
+/** True while a job stopped before it finished its page set. */
+function isUnfinished(job: Job): boolean {
+  const total = Number(job.progress?.total) || 0;
+  const done = Number(job.progress?.done) || 0;
+  return total === 0 || done < total;
 }

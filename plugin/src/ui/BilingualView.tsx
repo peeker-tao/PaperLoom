@@ -83,6 +83,11 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
   ).length;
   const translated = pageSegments.filter((segment) => segment.translation).length;
   const overlayReady = layout === "overlay" && Boolean(image) && !renderFailed;
+  // 版式视图 only draws *translations* on top of the page bitmap, so a page with
+  // none shows nothing but the original page — which reads as "the translation
+  // does not work" rather than "this page is not translated yet".
+  const pageUntranslated = pageSegments.length > 0 && translated === 0;
+  const blockedReason = controller.translationBlockedReason();
 
   const activeSegment = active ? pageSegments.find((item) => item.id === active) || null : null;
 
@@ -187,6 +192,34 @@ export function BilingualView(props: { controller: ReaderController; state: UISt
         className="pl-bilingual__cols"
         style={{ display: "block", overflowY: "auto" }}
       >
+        {layout === "overlay" && pageUntranslated ? (
+          <div className="pl-card pl-card--warn pl-small" style={{ margin: "8px 12px 0" }}>
+            <strong>第 {state.page} 页还没有译文</strong>
+            <div style={{ marginTop: 4 }}>
+              版式视图是把译文盖在原文页面上，所以这一页现在只能看到原始 PDF。本页共{" "}
+              {pageSegments.length} 段待译。
+            </div>
+            <div className="pl-actions">
+              <button
+                type="button"
+                className="pl-btn pl-btn--primary"
+                disabled={Boolean(blockedReason)}
+                title={blockedReason || `翻译第 ${state.page} 页`}
+                onClick={() => void controller.startTranslation([state.page])}
+              >
+                翻译本页
+              </button>
+              <button
+                type="button"
+                className="pl-btn pl-btn--ghost"
+                title="纯文本阅读视图：英文与中文逐段对照，不需要先有译文"
+                onClick={() => setLayout("markdown")}
+              >
+                改用阅读视图
+              </button>
+            </div>
+          </div>
+        ) : null}
         {!pageSegments.length ? (
           <div className="pl-bilingual__empty">
             本页没有可显示的段落。可能是扫描页、纯图表页，或分段合并失败。

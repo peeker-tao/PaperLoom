@@ -118,6 +118,33 @@ export function MarkdownReading(props: {
       </div>
 
       <div className="pl-md__body">
+        {/* "只显示译文" with nothing translated is a blank page. Say why, and
+            offer the one click that fixes it. */}
+        {mode === "translated" && translated === 0 ? (
+          <div className="pl-card pl-card--warn pl-small" style={{ marginBottom: 12 }}>
+            <strong>还没有任何译文</strong>
+            <div style={{ marginTop: 4 }}>
+              当前是「只显示译文」模式，所以这里是空的。可以先翻译，或切回双语看原文。
+            </div>
+            <div className="pl-actions">
+              <button
+                type="button"
+                className="pl-btn pl-btn--primary"
+                disabled={Boolean(controller.translationBlockedReason())}
+                onClick={() => void controller.startTranslation([state.page])}
+              >
+                翻译本页
+              </button>
+              <button
+                type="button"
+                className="pl-btn pl-btn--ghost"
+                onClick={() => controller.setMode("dual")}
+              >
+                改看双语
+              </button>
+            </div>
+          </div>
+        ) : null}
         {!segments.length ? (
           <div className="pl-bilingual__empty">
             还没有可读的正文。若刚打开论文，脚本可能仍在解析；扫描件需要先 OCR。

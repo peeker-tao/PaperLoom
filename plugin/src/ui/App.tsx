@@ -112,8 +112,26 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
 
   const translated = state.segments.filter((segment) => segment.translation).length;
   const progress = state.job?.progress;
-  const percent =
-    progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : translated ? 100 : 0;
+  /**
+   * While a job runs, the number that matters is that job's own progress.
+   *
+   * The footer used to show the paper-wide ratio, so translating page 1 of a
+   * 17-page paper read "0/469" the whole time — indistinguishable from "nothing
+   * is happening", which is exactly when people give up and cancel.
+   */
+  const jobTotal = Number(progress?.total) || 0;
+  const jobDone = Number(progress?.done) || 0;
+  const jobRunning = state.translating && jobTotal > 0;
+  const percent = jobRunning
+    ? Math.min(100, (jobDone / jobTotal) * 100)
+    : jobTotal > 0 && state.job?.state === "succeeded"
+      ? 100
+      : translated
+        ? 100
+        : 0;
+  const progressLabel = jobRunning
+    ? `正在翻译第 ${progress?.page ?? state.page} 页 · ${jobDone}/${jobTotal} 段`
+    : `已翻译 ${translated}/${state.segments.length} 段`;
   // A disabled button with no explanation is indistinguishable from a broken one.
   const blockedReason = controller.translationBlockedReason();
 
@@ -246,11 +264,15 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
         <div className="pl-footer">
           <span className="pl-dot" data-state={serviceState(state)} title={serviceTitle(state)} />
           <span title="阅读位置自动保存">p.{state.page}</span>
-          <span className="pl-progress" title={`已翻译 ${translated}/${state.segments.length} 段`}>
+          <span className="pl-progress" title={progressLabel}>
             <div style={{ width: `${percent}%` }} />
           </span>
-          <span>
-            {state.segments.length ? `${translated}/${state.segments.length}` : "未解析"}
+          <span title={progressLabel}>
+            {jobRunning
+              ? `第 ${progress?.page ?? state.page} 页 · ${jobDone}/${jobTotal}`
+              : state.segments.length
+                ? `${translated}/${state.segments.length}`
+                : "未解析"}
           </span>
           {state.job?.layout && state.job.layout.state === "failed" ? (
             <span
