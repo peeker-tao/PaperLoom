@@ -41,7 +41,30 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   没反应"。
 - 对话气泡改为带阴影的圆角卡片，角色标签更轻。
 
-### Fixed — 模型选择
+### Fixed — 翻译入口
+
+- **「页码…」在 Zotero 里点了没反应.** It called `window.prompt()`, which is not
+  reliably available on Zotero's main window; when it threw, the `catch` treated
+  the exception as "user cancelled", so nothing happened and nothing was
+  explained. Replaced with an in-sidebar dialog (`TranslateDialog`) that behaves
+  the same in a tab, an embedded reader and a separate window.
+- **页码范围只有一句"格式无效".** `src/pages.ts` now names the offending
+  fragment (`无法识别的页码片段「abc」`), rejects reversed ranges and page 0, caps
+  absurd numbers, accepts full-width commas and dashes, de-duplicates and sorts.
+  The dialog also checks the range against the paper's page count.
+- **排队/解析/翻译/完成/失败/取消看不出来.** Added `JobBanner`: each state names
+  itself with a colour (已排队 / 正在解析 / 正在翻译 N/M 段 · 第 K 页 / 翻译完成 +
+  cost / 翻译失败 + reason / 已取消 / 翻译中断), and a finished job offers
+  「查看译文」directly.
+- **禁用按钮不说原因.** `translationBlockedReason()` explains why the three
+  translate buttons are unavailable (扫描件需 OCR / 正在翻译 / 服务未连接) instead of
+  just greying them out; the same text is the button tooltip.
+- **已有译文时不知道该点哪个.** A partial-translation card offers the three
+  genuinely different intents: 查看译文 (read what exists), 继续翻译 (only the
+  missing segments), 重译全文 (redo everything — explicitly flagged as costing
+  money again).
+
+
 
 - **切换问答模型没有任何效果.** The picker called `setModel`, which only updated
   local UI state; `ask()` never put `model` in the request body, so every
@@ -63,6 +86,15 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `chat_model`）、翻译用 `translate_model`、分析用 `analysis_model`。侧边栏的
   下拉框只影响提问，标题与通知都写明了这一点；回答头部显示**实际**使用的模型
   （`done` 事件回传，服务端回退时会与所选不同）。
+
+### Tests
+
+- `plugin/test/pages.test.mjs` (8) — range parsing: `1-3,5`, full-width commas and
+  dashes, de-duplication, blank = whole paper, and the error cases that would
+  otherwise translate the wrong pages.
+- `plugin/test/jump.test.mjs` (7) — the jump contract, including
+  "a navigate that resolves without moving is not a success".
+- `plugin/test/model.test.mjs` (7) — model selection rule.
 
 ## [0.2.2] - 2026-11-18
 

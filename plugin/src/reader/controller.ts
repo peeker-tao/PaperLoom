@@ -1,6 +1,7 @@
 import { errorText, debug, flush } from "../log";
 import { isKnownModel, modelLabel, resolveChatModel } from "../model-choice";
 import { noteIndexPref, saveMarkdownNote, saveNote } from "../notes";
+import { parsePageInput } from "../pages";
 import { probeComposer, probeFocus, probeInteractive } from "../ui/probe";
 import type { ServiceClient } from "../service/client";
 import { ServiceError } from "../service/client";
@@ -130,6 +131,8 @@ export interface UIState {
    * the position they were reading.
    */
   canReturnToTranslation: boolean;
+  /** Page-range dialog for "指定页" translation. */
+  translateDialogOpen: boolean;
 }
 
 function initialState(prefs: PluginHost["prefs"]): UIState {
@@ -170,6 +173,7 @@ function initialState(prefs: PluginHost["prefs"]): UIState {
     translationStatus: null,
     highlight: null,
     canReturnToTranslation: false,
+    translateDialogOpen: false,
   };
 }
 
@@ -1337,7 +1341,12 @@ export class ReaderController {
   }
 
   // ---------------------------------------------------------------- translation
-  async startTranslation(pages?: number[]): Promise<void> {
+  /**
+   * Translate pages (or the whole paper). `force` re-does text that already has
+   * a translation, which is what "重译" means — without it the job only fills in
+   * what is missing.
+   */
+  async startTranslation(pages?: number[], options: { force?: boolean } = {}): Promise<void> {
     const document = this.state.document;
     if (!document || this.state.translating) {
       return;
@@ -1351,6 +1360,7 @@ export class ReaderController {
       const { job } = await this.withService(() =>
         this.host.service.client.startTranslation(document.id, {
           pages: pages && pages.length ? pages : null,
+          ...(options.force ? { force: true } : {}),
         }),
       );
       this.set({ job });
@@ -1360,24 +1370,69 @@ export class ReaderController {
     }
   }
 
-  /** Ask for a page range (e.g. "1-3,5") and translate only those pages. */
-  async startTranslationWithPrompt(): Promise<void> {
-    let input: string | null = null;
-    try {
-      const win = Zotero.getMainWindow();
-      input = win.prompt("输入页码范围（例如 1-3,5；留空表示全文）", "");
-    } catch {
-      input = null;
+  /**
+   * Open the in-plugin page-range dialog.
+   *
+   * This used to call `window.prompt()`, which Zotero's main window does not
+   * reliably provide; when it threw, the catch treated it as "user cancelled" so
+   * the button silently did nothing and no error was shown. The dialog is part of
+   * the sidebar now, so it works the same in a tab, a separate window and an
+   * embedded reader.
+   */
+  openTranslateDialog(open = true): void {
+    this.set({ translateDialogOpen: open });
+  }
+
+  /**
+   * Translate only the pages in `input` (e.g. "1-3,5").
+   *
+   * Returns a human-readable problem when the input is unusable, so the dialog
+   * can show it next to the field instead of closing and failing.
+   */
+  async translatePages(input: string): Promise<string | null> {
+    const document = this.state.document;
+    if (!document) {
+      return "论文尚未就绪";
     }
-    if (input === null) {
-      return;
+    const parsed = parsePageInput(input);
+    if (parsed.error) {
+      // The parser names the offending fragment, which is far easier to fix than
+      // a generic "格式无效".
+      return parsed.error;
     }
-    const pages = parsePageRanges(input);
-    if (pages === null) {
-      this.set({ error: "页码范围格式无效，请输入如 1-3,5" });
-      return;
+    const pages = parsed.pages;
+    const max = Number(document.pages) || 0;
+    if (pages.length) {
+      const tooFar = pages.filter((page) => page > max);
+      if (max && tooFar.length) {
+        return `超出论文页数（共 ${max} 页）：${tooFar.slice(0, 5).join(", ")}`;
+      }
+      this.set({ translateDialogOpen: false });
+      await this.startTranslation(pages);
+      return null;
     }
-    await this.startTranslation(pages.length ? pages : undefined);
+    // Empty input means the whole paper, which is what the 全文 button does.
+    this.set({ translateDialogOpen: false });
+    await this.startTranslation();
+    return null;
+  }
+
+  /** Why the translate buttons are unavailable, or "" when they work. */
+  translationBlockedReason(): string {
+    const document = this.state.document;
+    if (!document) {
+      return "论文尚未就绪";
+    }
+    if (document.scanned) {
+      return "该 PDF 没有文本层（疑似扫描件），请先 OCR";
+    }
+    if (this.state.translating) {
+      return "正在翻译中，可先取消当前任务";
+    }
+    if (!this.state.service) {
+      return "本地服务未连接";
+    }
+    return "";
   }
 
   private async followJob(jobId: string): Promise<void> {
@@ -1892,25 +1947,3 @@ function hash(text: string): string {
   return Math.abs(value).toString(36);
 }
 
-function parsePageRanges(input: string): number[] | null {
-  const text = input.trim();
-  if (!text) {
-    return [];
-  }
-  const pages = new Set<number>();
-  for (const part of text.split(/[,，\s]+/).filter(Boolean)) {
-    const match = /^(\d+)(?:\s*[-~]\s*(\d+))?$/.exec(part);
-    if (!match) {
-      return null;
-    }
-    const start = Number(match[1]);
-    const end = match[2] ? Number(match[2]) : start;
-    if (start < 1 || end < start || end > 5000) {
-      return null;
-    }
-    for (let page = start; page <= end; page += 1) {
-      pages.add(page);
-    }
-  }
-  return Array.from(pages).sort((a, b) => a - b);
-}

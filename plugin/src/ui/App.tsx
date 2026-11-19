@@ -5,8 +5,10 @@ import { AnalysisPanel } from "./AnalysisPanel";
 import { BilingualView } from "./BilingualView";
 import { ChatPanel } from "./ChatPanel";
 import { GlossaryPanel } from "./GlossaryPanel";
+import { JobBanner } from "./JobBanner";
 import { NotesPanel } from "./NotesPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { TranslateDialog } from "./TranslateDialog";
 import { IconButton, Modal } from "./common";
 
 function serviceState(state: UIState): "ok" | "warn" | "down" {
@@ -30,13 +32,72 @@ function serviceTitle(state: UIState): string {
   return `服务 ${state.service.version} · ${key}`;
 }
 
+/**
+ * Shown when a paper is partly translated.
+ *
+ * Three intents deserve three buttons, and they are genuinely different: keep
+ * reading what exists (查看译文), fill in only what is missing (继续翻译), or pay
+ * to redo everything (重译全文). Collapsing them into one "翻译" button is what
+ * left users unsure whether they were about to be charged again.
+ */
+function PartialTranslationCard(props: {
+  controller: ReaderController;
+  state: UIState;
+}): JSX.Element | null {
+  const { controller, state } = props;
+  const total = state.segments.filter(
+    (segment) => segment.kind !== "reference" && segment.kind !== "figure" && segment.kind !== "noise",
+  ).length;
+  const translated = state.segments.filter((segment) => segment.translation).length;
+  if (state.translating || !total || translated === 0 || translated >= total) {
+    return null;
+  }
+  return (
+    <div className="pl-card pl-small" style={{ margin: "8px 10px 0" }}>
+      <strong>
+        已翻译 {translated}/{total} 段
+      </strong>
+      <div className="pl-hint" style={{ marginTop: 2 }}>
+        继续翻译只处理未译部分；重译全文会重新生成所有段落（会产生新费用）。
+      </div>
+      <div className="pl-actions">
+        <button
+          type="button"
+          className="pl-btn pl-btn--primary"
+          onClick={() => controller.toggleBilingual(true)}
+        >
+          查看译文
+        </button>
+        <button
+          type="button"
+          className="pl-btn"
+          title="只翻译还没有译文的段落"
+          onClick={() => void controller.startTranslation()}
+        >
+          继续翻译
+        </button>
+        <button
+          type="button"
+          className="pl-btn pl-btn--ghost"
+          title="重新翻译全部段落（会产生新费用）"
+          onClick={() => void controller.startTranslation(undefined, { force: true })}
+        >
+          重译全文
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function App({ controller }: { controller: ReaderController }): JSX.Element {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        if (state.settingsOpen) {
+        if (state.translateDialogOpen) {
+          controller.openTranslateDialog(false);
+        } else if (state.settingsOpen) {
           controller.openSettings(false);
         } else if (state.glossaryOpen) {
           controller.openGlossary(false);
@@ -46,12 +107,14 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
     const doc = (controller as any).reader?._iframeWindow?.document as Document | undefined;
     doc?.addEventListener("keydown", onKey);
     return () => doc?.removeEventListener("keydown", onKey);
-  }, [controller, state.settingsOpen, state.glossaryOpen]);
+  }, [controller, state.settingsOpen, state.glossaryOpen, state.translateDialogOpen]);
 
   const translated = state.segments.filter((segment) => segment.translation).length;
   const progress = state.job?.progress;
   const percent =
     progress && progress.total > 0 ? Math.min(100, (progress.done / progress.total) * 100) : translated ? 100 : 0;
+  // A disabled button with no explanation is indistinguishable from a broken one.
+  const blockedReason = controller.translationBlockedReason();
 
   return (
     <div className="pl-root" data-paperloom-root="1">
@@ -123,6 +186,8 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           </IconButton>
         </div>
 
+        <JobBanner controller={controller} state={state} />
+
         <div className="pl-tabs" role="tablist">
           {(["chat", "notes", "analysis"] as const).map((tab) => (
             <button
@@ -139,6 +204,7 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
         </div>
 
         <div className="pl-body">
+          <PartialTranslationCard controller={controller} state={state} />
           {state.translationStatus?.needsAttention ? (
             <div className="pl-card pl-card--warn pl-small" style={{ margin: "8px 10px 0" }}>
               <strong>
@@ -198,21 +264,29 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
             </button>
           ) : (
             <>
-              <button type="button" className="pl-btn pl-btn--ghost" title="翻译当前页" onClick={() => void controller.startTranslation([state.page])}>
+              <button
+                type="button"
+                className="pl-btn pl-btn--ghost"
+                title={blockedReason || `翻译第 ${state.page} 页`}
+                disabled={Boolean(blockedReason)}
+                onClick={() => void controller.startTranslation([state.page])}
+              >
                 本页
               </button>
               <button
                 type="button"
                 className="pl-btn pl-btn--ghost"
-                title="指定页码范围"
-                onClick={() => void controller.startTranslationWithPrompt()}
+                title={blockedReason || "输入页码范围，例如 1-3,5"}
+                disabled={Boolean(blockedReason)}
+                onClick={() => controller.openTranslateDialog(true)}
               >
                 页码…
               </button>
               <button
                 type="button"
                 className="pl-btn pl-btn--ghost"
-                title="翻译全文"
+                title={blockedReason || "翻译全文"}
+                disabled={Boolean(blockedReason)}
                 onClick={() => void controller.startTranslation()}
               >
                 全文
@@ -300,6 +374,8 @@ export function App({ controller }: { controller: ReaderController }): JSX.Eleme
           <GlossaryPanel controller={controller} state={state} />
         </Modal>
       ) : null}
+
+      <TranslateDialog controller={controller} state={state} />
     </div>
   );
 }

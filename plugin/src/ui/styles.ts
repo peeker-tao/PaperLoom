@@ -256,6 +256,22 @@ export const SHADOW_CSS = `
 .pl-dot[data-state="ok"] { background: #2f8f6b; box-shadow: 0 0 0 3px rgba(47, 143, 107, 0.16); }
 .pl-dot[data-state="warn"] { background: #c08a2e; box-shadow: 0 0 0 3px rgba(192, 138, 46, 0.16); }
 .pl-dot[data-state="down"] { background: var(--pl-danger); box-shadow: 0 0 0 3px rgba(163, 58, 44, 0.16); }
+
+/* Job status line. Sits under the header so "翻译到哪儿了" is answered without
+   opening a panel; each state carries its own colour and verb. */
+.pl-job {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px; font-size: 11.5px;
+  border-bottom: 1px solid var(--pl-border);
+  background: #f4f7f5; color: var(--pl-fg-soft);
+}
+.pl-job--info { background: #f2f6f5; }
+.pl-job--ok { background: #eef7f1; }
+.pl-job--warn { background: #fdf8ec; color: #6a4a10; }
+.pl-job--error { background: #fdf4f2; color: #7c3025; }
+.pl-job__label { font-weight: 600; }
+.pl-job__detail { color: var(--pl-muted); min-width: 0; }
+.pl-job--warn .pl-job__detail, .pl-job--error .pl-job__detail { color: inherit; opacity: 0.85; }
 .pl-muted { color: var(--pl-muted); }
 .pl-small { font-size: 11.5px; }
 .pl-row { display: flex; align-items: center; gap: 8px; }

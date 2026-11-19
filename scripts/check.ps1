@@ -25,6 +25,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "plugin jump tests failed" }
     node test/model.test.mjs
     if ($LASTEXITCODE -ne 0) { throw "plugin model tests failed" }
+    node test/pages.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw "plugin page tests failed" }
     node esbuild.config.mjs
     if ($LASTEXITCODE -ne 0) { throw "build failed" }
   }
